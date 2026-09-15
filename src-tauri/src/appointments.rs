@@ -1,3 +1,4 @@
+#![allow(clippy::possible_missing_else)]
 use chrono::{Datelike, NaiveDateTime, NaiveTime, Weekday};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
