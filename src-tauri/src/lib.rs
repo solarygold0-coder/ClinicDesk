@@ -7,6 +7,7 @@ pub mod visit_tracking;
 use rusqlite::Connection;
 use std::{fs, path::PathBuf, sync::Mutex};
 use tauri::Manager;
+/// Shared local SQLite connection used by Tauri commands.
 pub struct Db(pub Mutex<Connection>);
 fn init_db(path: &PathBuf) -> Result<Connection, String> {
     if let Some(p) = path.parent() {
