@@ -1,3 +1,5 @@
+#![allow(clippy::possible_missing_else)]
+
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize)]
