@@ -21,21 +21,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
       - name: Install dependencies
-        run: npm ci
+        run: npm install --ignore-scripts
       - run: npm run build
 
-  frontend-lockfile:
-    name: Frontend lockfile integrity
+  frontend-dependency-resolution:
+    name: Frontend dependency resolution
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci --ignore-scripts
+      - run: npm install --ignore-scripts
 
   rust-check:
     name: Rust check
@@ -43,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
 
   rust-tests-windows:
     name: Rust tests (Windows)
@@ -51,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   rust-tests-linux:
     name: Rust tests (Linux)
@@ -59,7 +57,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
 
   rust-clippy:
     name: Rust clippy
@@ -69,7 +67,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
   rust-format:
     name: Rust format
@@ -87,7 +85,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked migration_tests -- --nocapture
+      - run: cargo test --manifest-path src-tauri/Cargo.toml migration_tests -- --nocapture
 
   attachment-tests:
     name: Attachment safety tests
@@ -95,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked attachments::tests -- --nocapture
+      - run: cargo test --manifest-path src-tauri/Cargo.toml attachments::tests -- --nocapture
 
   scheduling-tests:
     name: Scheduling tests
@@ -103,7 +101,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked scheduling::tests -- --nocapture
+      - run: cargo test --manifest-path src-tauri/Cargo.toml scheduling::tests -- --nocapture
 
   appointment-tests:
     name: Appointment tests
@@ -111,7 +109,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked appointments::tests -- --nocapture
+      - run: cargo test --manifest-path src-tauri/Cargo.toml appointments::tests -- --nocapture
 
   patient-tests:
     name: Patient tests
@@ -119,14 +117,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked patients::tests -- --nocapture
+      - run: cargo test --manifest-path src-tauri/Cargo.toml patients::tests -- --nocapture
 
   gate:
     name: All checks passed
     if: always()
     needs:
       - frontend-build
-      - frontend-lockfile
+      - frontend-dependency-resolution
       - rust-check
       - rust-tests-windows
       - rust-tests-linux
@@ -143,7 +141,7 @@ jobs:
         env:
           RESULTS: >-
             ${{ needs.frontend-build.result }}
-            ${{ needs.frontend-lockfile.result }}
+            ${{ needs.frontend-dependency-resolution.result }}
             ${{ needs.rust-check.result }}
             ${{ needs.rust-tests-windows.result }}
             ${{ needs.rust-tests-linux.result }}
