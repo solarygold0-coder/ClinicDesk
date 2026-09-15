@@ -55,6 +55,19 @@ fn init_db(path: &PathBuf) -> Result<Connection, String> {
         ))
         .map_err(|e| e.to_string())?;
     }
+    let schema_version: i64 = db
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if schema_version < 7 {
+        db.execute_batch(include_str!(
+            "../migrations/007_appointment_visit_tracking.sql"
+        ))
+        .map_err(|e| e.to_string())?;
+    }
     Ok(db)
 }
 fn with_db<T>(
