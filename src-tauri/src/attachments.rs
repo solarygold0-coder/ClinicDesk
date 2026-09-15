@@ -182,29 +182,35 @@ pub fn add(
         return Err("حجم المرفق يجب أن يكون بين 1 بايت و25 ميجابايت".into());
     }
     ensure_patient(conn, patient_id)?;
-    conn.execute("INSERT INTO attachments(patient_id,stored_name,original_name,mime_type,size_bytes,sha256) VALUES(?1,?2,?3,?4,?5,?6)", params![patient_id,stored_name,original_name,mime_type,size_bytes,sha256]).map_err(|e| e.to_string())?;
-    let id = conn.last_insert_rowid();
-    conn.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_added','patient',?1,?2)", params![patient_id,format!(r#"{{"attachmentId":{id}}}"#)]).map_err(|e| e.to_string())?;
+
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    tx.execute("INSERT INTO attachments(patient_id,stored_name,original_name,mime_type,size_bytes,sha256) VALUES(?1,?2,?3,?4,?5,?6)", params![patient_id,stored_name,original_name,mime_type,size_bytes,sha256]).map_err(|e| e.to_string())?;
+    let id = tx.last_insert_rowid();
+    tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_added','patient',?1,?2)", params![patient_id,format!(r#"{{"attachmentId":{id}}}"#)]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(id)
 }
 
 pub fn remove(conn: &Connection, id: i64) -> Result<String, String> {
-    let (patient_id, stored_name): (i64, String) = conn
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let (patient_id, stored_name): (i64, String) = tx
         .query_row(
             "SELECT patient_id,stored_name FROM attachments WHERE id=?1",
             params![id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .map_err(|_| "المرفق غير موجود".to_string())?;
-    conn.execute("DELETE FROM attachments WHERE id=?1", params![id])
+    tx.execute("DELETE FROM attachments WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
-    conn.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_removed','patient',?1,?2)", params![patient_id,format!(r#"{{"attachmentId":{id}}}"#)]).map_err(|e| e.to_string())?;
+    tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_removed','patient',?1,?2)", params![patient_id,format!(r#"{{"attachmentId":{id}}}"#)]).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(stored_name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(include_str!("../migrations/001_init.sql"))
@@ -216,6 +222,14 @@ mod tests {
         .unwrap();
         conn
     }
+
+    fn fail_audit(conn: &Connection, event_type: &str) {
+        conn.execute_batch(&format!(
+            "CREATE TRIGGER fail_attachment_audit BEFORE INSERT ON audit_log WHEN NEW.event_type='{event_type}' BEGIN SELECT RAISE(ABORT, 'forced audit failure'); END;"
+        ))
+        .unwrap();
+    }
+
     #[test]
     fn attachment_metadata_round_trip() {
         let conn = db();
@@ -233,6 +247,44 @@ mod tests {
         assert_eq!(remove(&conn, id).unwrap(), "abc.pdf");
         assert!(list(&conn, 1).unwrap().is_empty());
     }
+
+    #[test]
+    fn add_rolls_back_when_audit_fails() {
+        let conn = db();
+        fail_audit(&conn, "attachment_added");
+        assert!(add(
+            &conn,
+            1,
+            "abc.pdf",
+            "report.pdf",
+            Some("application/pdf"),
+            1024,
+            &"a".repeat(64),
+        )
+        .is_err());
+        assert!(list(&conn, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn remove_rolls_back_when_audit_fails() {
+        let conn = db();
+        let id = add(
+            &conn,
+            1,
+            "abc.pdf",
+            "report.pdf",
+            Some("application/pdf"),
+            1024,
+            &"a".repeat(64),
+        )
+        .unwrap();
+        fail_audit(&conn, "attachment_removed");
+        assert!(remove(&conn, id).is_err());
+        let attachments = list(&conn, 1).unwrap();
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].id, id);
+    }
+
     #[test]
     fn rejects_oversized_attachment() {
         let conn = db();
@@ -247,6 +299,7 @@ mod tests {
         )
         .is_err());
     }
+
     #[test]
     fn rejects_path_traversal() {
         let conn = db();
