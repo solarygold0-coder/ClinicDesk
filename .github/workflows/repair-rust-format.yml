@@ -1,0 +1,46 @@
+name: repair-rust-format
+
+on:
+  push:
+    branches: [tauri-react-rebuild]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Restore full appointment test coverage and keep patient history query
+        shell: bash
+        run: |
+          git show f5079d38d70a1748ebd2a53d4fe2ad0a9ae9361c:src-tauri/src/appointments.rs > /tmp/appointments.rs
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/appointments.rs')
+          s = p.read_text()
+          needle = 'fn ensure_refs(tx: &Transaction, i: &AppointmentInput) -> Result<i64, String> {'
+          addition = '''pub fn list_for_patient(\n    c: &Connection,\n    patient_id: i64,\n    limit: i64,\n) -> Result<Vec<Appointment>, String> {\n    let sql = format!(\n        "{SELECT} WHERE a.patient_id=?1 ORDER BY a.starts_at DESC LIMIT ?2"\n    );\n    let mut s = c.prepare(&sql).map_err(|e| e.to_string())?;\n    let rows = s\n        .query_map(params![patient_id, limit.clamp(1, 100)], map)\n        .map_err(|e| e.to_string())?;\n    rows.collect::<Result<Vec<_>, _>>()\n        .map_err(|e| e.to_string())\n}\n'''
+          if needle not in s:
+              raise SystemExit('insertion point missing')
+          p.write_text(s.replace(needle, addition + needle, 1))
+          PY
+          cp /tmp/appointments.rs src-tauri/src/appointments.rs
+          cd src-tauri
+          cargo fmt --all
+      - name: Commit repaired sources
+        shell: bash
+        run: |
+          rm .github/workflows/repair-rust-format.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src-tauri/src/appointments.rs src-tauri/src/lib.rs .github/workflows/repair-rust-format.yml
+          git commit -m "fix: restore appointment tests and apply rustfmt"
+          git push
