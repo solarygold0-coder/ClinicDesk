@@ -23,10 +23,10 @@ jobs:
         language: [javascript-typescript, rust]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
 
@@ -35,6 +35,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Ensure Tauri icon exists for analysis build
+        if: matrix.language == 'rust'
+        run: |
+          test -f src-tauri/icons/icon.png || cp public/vite.svg src-tauri/icons/icon.png
 
       - name: Set up Rust
         if: matrix.language == 'rust'
@@ -45,6 +50,6 @@ jobs:
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
         with:
           category: '/language:${{ matrix.language }}'
