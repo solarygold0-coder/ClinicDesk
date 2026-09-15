@@ -3,31 +3,308 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Clinic { pub id:i64, pub name:String, pub phone:Option<String>, pub address:Option<String>, pub is_active:bool }
+pub struct Clinic {
+    pub id: i64,
+    pub name: String,
+    pub phone: Option<String>,
+    pub address: Option<String>,
+    pub is_active: bool,
+}
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClinicInput { pub name:String, pub phone:Option<String>, pub address:Option<String> }
+pub struct ClinicInput {
+    pub name: String,
+    pub phone: Option<String>,
+    pub address: Option<String>,
+}
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Doctor { pub id:i64, pub clinic_id:Option<i64>, pub name:String, pub specialty:Option<String>, pub phone:Option<String>, pub is_active:bool }
+pub struct Doctor {
+    pub id: i64,
+    pub clinic_id: Option<i64>,
+    pub name: String,
+    pub specialty: Option<String>,
+    pub phone: Option<String>,
+    pub is_active: bool,
+}
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DoctorInput { pub clinic_id:Option<i64>, pub name:String, pub specialty:Option<String>, pub phone:Option<String> }
+pub struct DoctorInput {
+    pub clinic_id: Option<i64>,
+    pub name: String,
+    pub specialty: Option<String>,
+    pub phone: Option<String>,
+}
 
-fn clean(v:Option<String>)->Option<String>{v.map(|x|x.trim().to_string()).filter(|x|!x.is_empty())}
-fn clinic(c:&Connection,id:i64)->Result<Option<Clinic>,String>{c.query_row("SELECT id,name,phone,address,is_active FROM clinics WHERE id=?1",[id],|r|Ok(Clinic{id:r.get(0)?,name:r.get(1)?,phone:r.get(2)?,address:r.get(3)?,is_active:r.get::<_,i64>(4)?==1})).optional().map_err(|e|e.to_string())}
-fn doctor(c:&Connection,id:i64)->Result<Option<Doctor>,String>{c.query_row("SELECT id,clinic_id,name,specialty,phone,is_active FROM doctors WHERE id=?1",[id],|r|Ok(Doctor{id:r.get(0)?,clinic_id:r.get(1)?,name:r.get(2)?,specialty:r.get(3)?,phone:r.get(4)?,is_active:r.get::<_,i64>(5)?==1})).optional().map_err(|e|e.to_string())}
-fn valid_name(name:&str,label:&str)->Result<String,String>{let n=name.trim().to_string();if n.len()<2{Err(format!("اسم {label} مطلوب"))}else{Ok(n)}}
-fn valid_clinic(c:&Connection,id:Option<i64>)->Result<(),String>{if let Some(id)=id{let ok:Option<i64>=c.query_row("SELECT id FROM clinics WHERE id=?1 AND is_active=1",[id],|r|r.get(0)).optional().map_err(|e|e.to_string())?;if ok.is_none(){return Err("العيادة المحددة غير موجودة أو غير نشطة".into())}}Ok(())}
+fn clean(v: Option<String>) -> Option<String> {
+    v.map(|x| x.trim().to_string()).filter(|x| !x.is_empty())
+}
+fn clinic(c: &Connection, id: i64) -> Result<Option<Clinic>, String> {
+    c.query_row(
+        "SELECT id,name,phone,address,is_active FROM clinics WHERE id=?1",
+        [id],
+        |r| {
+            Ok(Clinic {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                phone: r.get(2)?,
+                address: r.get(3)?,
+                is_active: r.get::<_, i64>(4)? == 1,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+fn doctor(c: &Connection, id: i64) -> Result<Option<Doctor>, String> {
+    c.query_row(
+        "SELECT id,clinic_id,name,specialty,phone,is_active FROM doctors WHERE id=?1",
+        [id],
+        |r| {
+            Ok(Doctor {
+                id: r.get(0)?,
+                clinic_id: r.get(1)?,
+                name: r.get(2)?,
+                specialty: r.get(3)?,
+                phone: r.get(4)?,
+                is_active: r.get::<_, i64>(5)? == 1,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+fn valid_name(name: &str, label: &str) -> Result<String, String> {
+    let n = name.trim().to_string();
+    if n.len() < 2 {
+        Err(format!("اسم {label} مطلوب"))
+    } else {
+        Ok(n)
+    }
+}
+fn valid_clinic(c: &Connection, id: Option<i64>) -> Result<(), String> {
+    if let Some(id) = id {
+        let ok: Option<i64> = c
+            .query_row(
+                "SELECT id FROM clinics WHERE id=?1 AND is_active=1",
+                [id],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| e.to_string())?;
+        if ok.is_none() {
+            return Err("العيادة المحددة غير موجودة أو غير نشطة".into());
+        }
+    }
+    Ok(())
+}
 
-pub fn list_clinics(c:&Connection)->Result<Vec<Clinic>,String>{let mut s=c.prepare("SELECT id,name,phone,address,is_active FROM clinics WHERE is_active=1 ORDER BY name").map_err(|e|e.to_string())?;let rows=s.query_map([],|r|Ok(Clinic{id:r.get(0)?,name:r.get(1)?,phone:r.get(2)?,address:r.get(3)?,is_active:r.get::<_,i64>(4)?==1})).map_err(|e|e.to_string())?;rows.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())}
-pub fn create_clinic(c:&Connection,i:ClinicInput)->Result<Clinic,String>{let name=valid_name(&i.name,"العيادة")?;c.execute("INSERT INTO clinics(name,phone,address) VALUES(?1,?2,?3)",params![name,clean(i.phone),clean(i.address)]).map_err(|e|e.to_string())?;clinic(c,c.last_insert_rowid())?.ok_or_else(||"تعذر قراءة العيادة بعد الحفظ".into())}
-pub fn update_clinic(c:&Connection,id:i64,i:ClinicInput)->Result<Clinic,String>{let name=valid_name(&i.name,"العيادة")?;let n=c.execute("UPDATE clinics SET name=?1,phone=?2,address=?3,updated_at=CURRENT_TIMESTAMP WHERE id=?4 AND is_active=1",params![name,clean(i.phone),clean(i.address),id]).map_err(|e|e.to_string())?;if n==0{return Err("العيادة غير موجودة".into())}clinic(c,id)?.ok_or_else(||"العيادة غير موجودة".into())}
-pub fn deactivate_clinic(c:&Connection,id:i64)->Result<(),String>{let linked:i64=c.query_row("SELECT COUNT(*) FROM appointments WHERE clinic_id=?1 AND starts_at>CURRENT_TIMESTAMP AND status IN ('scheduled','arrived','in_progress')",[id],|r|r.get(0)).map_err(|e|e.to_string())?;if linked>0{return Err(format!("لا يمكن تعطيل العيادة: لديها {linked} موعد/مواعيد مستقبلية نشطة"))}let n=c.execute("UPDATE clinics SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND is_active=1",[id]).map_err(|e|e.to_string())?;if n==0{return Err("العيادة غير موجودة".into())}c.execute("UPDATE doctors SET clinic_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE clinic_id=?1",[id]).map_err(|e|e.to_string())?;Ok(())}
+pub fn list_clinics(c: &Connection) -> Result<Vec<Clinic>, String> {
+    let mut s = c
+        .prepare(
+            "SELECT id,name,phone,address,is_active FROM clinics WHERE is_active=1 ORDER BY name",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map([], |r| {
+            Ok(Clinic {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                phone: r.get(2)?,
+                address: r.get(3)?,
+                is_active: r.get::<_, i64>(4)? == 1,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+pub fn create_clinic(c: &Connection, i: ClinicInput) -> Result<Clinic, String> {
+    let name = valid_name(&i.name, "العيادة")?;
+    c.execute(
+        "INSERT INTO clinics(name,phone,address) VALUES(?1,?2,?3)",
+        params![name, clean(i.phone), clean(i.address)],
+    )
+    .map_err(|e| e.to_string())?;
+    clinic(c, c.last_insert_rowid())?.ok_or_else(|| "تعذر قراءة العيادة بعد الحفظ".into())
+}
+pub fn update_clinic(c: &Connection, id: i64, i: ClinicInput) -> Result<Clinic, String> {
+    let name = valid_name(&i.name, "العيادة")?;
+    let n=c.execute("UPDATE clinics SET name=?1,phone=?2,address=?3,updated_at=CURRENT_TIMESTAMP WHERE id=?4 AND is_active=1",params![name,clean(i.phone),clean(i.address),id]).map_err(|e|e.to_string())?;
+    if n == 0 {
+        return Err("العيادة غير موجودة".into());
+    }
+    clinic(c, id)?.ok_or_else(|| "العيادة غير موجودة".into())
+}
+pub fn deactivate_clinic(c: &Connection, id: i64) -> Result<(), String> {
+    let linked:i64=c.query_row("SELECT COUNT(*) FROM appointments WHERE clinic_id=?1 AND starts_at>CURRENT_TIMESTAMP AND status IN ('scheduled','arrived','in_progress')",[id],|r|r.get(0)).map_err(|e|e.to_string())?;
+    if linked > 0 {
+        return Err(format!(
+            "لا يمكن تعطيل العيادة: لديها {linked} موعد/مواعيد مستقبلية نشطة"
+        ));
+    }
+    let n=c.execute("UPDATE clinics SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND is_active=1",[id]).map_err(|e|e.to_string())?;
+    if n == 0 {
+        return Err("العيادة غير موجودة".into());
+    }
+    c.execute(
+        "UPDATE doctors SET clinic_id=NULL,updated_at=CURRENT_TIMESTAMP WHERE clinic_id=?1",
+        [id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
 
-pub fn list_doctors(c:&Connection)->Result<Vec<Doctor>,String>{let mut s=c.prepare("SELECT id,clinic_id,name,specialty,phone,is_active FROM doctors WHERE is_active=1 ORDER BY name").map_err(|e|e.to_string())?;let rows=s.query_map([],|r|Ok(Doctor{id:r.get(0)?,clinic_id:r.get(1)?,name:r.get(2)?,specialty:r.get(3)?,phone:r.get(4)?,is_active:r.get::<_,i64>(5)?==1})).map_err(|e|e.to_string())?;rows.collect::<Result<Vec<_>,_>>().map_err(|e|e.to_string())}
-pub fn create_doctor(c:&Connection,i:DoctorInput)->Result<Doctor,String>{let name=valid_name(&i.name,"الطبيب")?;valid_clinic(c,i.clinic_id)?;c.execute("INSERT INTO doctors(clinic_id,name,specialty,phone) VALUES(?1,?2,?3,?4)",params![i.clinic_id,name,clean(i.specialty),clean(i.phone)]).map_err(|e|e.to_string())?;doctor(c,c.last_insert_rowid())?.ok_or_else(||"تعذر قراءة الطبيب بعد الحفظ".into())}
-pub fn update_doctor(c:&Connection,id:i64,i:DoctorInput)->Result<Doctor,String>{let name=valid_name(&i.name,"الطبيب")?;valid_clinic(c,i.clinic_id)?;let n=c.execute("UPDATE doctors SET clinic_id=?1,name=?2,specialty=?3,phone=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND is_active=1",params![i.clinic_id,name,clean(i.specialty),clean(i.phone),id]).map_err(|e|e.to_string())?;if n==0{return Err("الطبيب غير موجود".into())}doctor(c,id)?.ok_or_else(||"الطبيب غير موجود".into())}
-pub fn deactivate_doctor(c:&Connection,id:i64)->Result<(),String>{let linked:i64=c.query_row("SELECT COUNT(*) FROM appointments WHERE doctor_id=?1 AND starts_at>CURRENT_TIMESTAMP AND status IN ('scheduled','arrived','in_progress')",[id],|r|r.get(0)).map_err(|e|e.to_string())?;if linked>0{return Err(format!("لا يمكن تعطيل الطبيب: لديه {linked} موعد/مواعيد مستقبلية نشطة"))}let n=c.execute("UPDATE doctors SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND is_active=1",[id]).map_err(|e|e.to_string())?;if n==0{return Err("الطبيب غير موجود".into())}Ok(())}
+pub fn list_doctors(c: &Connection) -> Result<Vec<Doctor>, String> {
+    let mut s=c.prepare("SELECT id,clinic_id,name,specialty,phone,is_active FROM doctors WHERE is_active=1 ORDER BY name").map_err(|e|e.to_string())?;
+    let rows = s
+        .query_map([], |r| {
+            Ok(Doctor {
+                id: r.get(0)?,
+                clinic_id: r.get(1)?,
+                name: r.get(2)?,
+                specialty: r.get(3)?,
+                phone: r.get(4)?,
+                is_active: r.get::<_, i64>(5)? == 1,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+pub fn create_doctor(c: &Connection, i: DoctorInput) -> Result<Doctor, String> {
+    let name = valid_name(&i.name, "الطبيب")?;
+    valid_clinic(c, i.clinic_id)?;
+    c.execute(
+        "INSERT INTO doctors(clinic_id,name,specialty,phone) VALUES(?1,?2,?3,?4)",
+        params![i.clinic_id, name, clean(i.specialty), clean(i.phone)],
+    )
+    .map_err(|e| e.to_string())?;
+    doctor(c, c.last_insert_rowid())?.ok_or_else(|| "تعذر قراءة الطبيب بعد الحفظ".into())
+}
+pub fn update_doctor(c: &Connection, id: i64, i: DoctorInput) -> Result<Doctor, String> {
+    let name = valid_name(&i.name, "الطبيب")?;
+    valid_clinic(c, i.clinic_id)?;
+    let n=c.execute("UPDATE doctors SET clinic_id=?1,name=?2,specialty=?3,phone=?4,updated_at=CURRENT_TIMESTAMP WHERE id=?5 AND is_active=1",params![i.clinic_id,name,clean(i.specialty),clean(i.phone),id]).map_err(|e|e.to_string())?;
+    if n == 0 {
+        return Err("الطبيب غير موجود".into());
+    }
+    doctor(c, id)?.ok_or_else(|| "الطبيب غير موجود".into())
+}
+pub fn deactivate_doctor(c: &Connection, id: i64) -> Result<(), String> {
+    let linked:i64=c.query_row("SELECT COUNT(*) FROM appointments WHERE doctor_id=?1 AND starts_at>CURRENT_TIMESTAMP AND status IN ('scheduled','arrived','in_progress')",[id],|r|r.get(0)).map_err(|e|e.to_string())?;
+    if linked > 0 {
+        return Err(format!(
+            "لا يمكن تعطيل الطبيب: لديه {linked} موعد/مواعيد مستقبلية نشطة"
+        ));
+    }
+    let n=c.execute("UPDATE doctors SET is_active=0,updated_at=CURRENT_TIMESTAMP WHERE id=?1 AND is_active=1",[id]).map_err(|e|e.to_string())?;
+    if n == 0 {
+        return Err("الطبيب غير موجود".into());
+    }
+    Ok(())
+}
 
-#[cfg(test)] mod tests{use super::*;fn db()->Connection{let c=Connection::open_in_memory().unwrap();c.execute_batch(include_str!("../migrations/001_init.sql")).unwrap();c}#[test]fn directory_starts_empty(){let c=db();assert!(list_clinics(&c).unwrap().is_empty());assert!(list_doctors(&c).unwrap().is_empty())}#[test]fn clinic_update_and_deactivate_work(){let c=db();let x=create_clinic(&c,ClinicInput{name:"عيادة أولى".into(),phone:None,address:None}).unwrap();let y=update_clinic(&c,x.id,ClinicInput{name:"عيادة محدثة".into(),phone:Some("0500000000".into()),address:None}).unwrap();assert_eq!(y.name,"عيادة محدثة");deactivate_clinic(&c,x.id).unwrap();assert!(list_clinics(&c).unwrap().is_empty())}#[test]fn doctor_update_and_deactivate_work(){let c=db();let cl=create_clinic(&c,ClinicInput{name:"عيادة".into(),phone:None,address:None}).unwrap();let d=create_doctor(&c,DoctorInput{clinic_id:Some(cl.id),name:"طبيب أول".into(),specialty:None,phone:None}).unwrap();let u=update_doctor(&c,d.id,DoctorInput{clinic_id:Some(cl.id),name:"طبيب محدث".into(),specialty:Some("باطنية".into()),phone:None}).unwrap();assert_eq!(u.name,"طبيب محدث");deactivate_doctor(&c,d.id).unwrap();assert!(list_doctors(&c).unwrap().is_empty())}#[test]fn doctor_rejects_inactive_clinic(){let c=db();let cl=create_clinic(&c,ClinicInput{name:"عيادة".into(),phone:None,address:None}).unwrap();deactivate_clinic(&c,cl.id).unwrap();assert!(create_doctor(&c,DoctorInput{clinic_id:Some(cl.id),name:"طبيب".into(),specialty:None,phone:None}).is_err())}}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn db() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        c
+    }
+    #[test]
+    fn directory_starts_empty() {
+        let c = db();
+        assert!(list_clinics(&c).unwrap().is_empty());
+        assert!(list_doctors(&c).unwrap().is_empty())
+    }
+    #[test]
+    fn clinic_update_and_deactivate_work() {
+        let c = db();
+        let x = create_clinic(
+            &c,
+            ClinicInput {
+                name: "عيادة أولى".into(),
+                phone: None,
+                address: None,
+            },
+        )
+        .unwrap();
+        let y = update_clinic(
+            &c,
+            x.id,
+            ClinicInput {
+                name: "عيادة محدثة".into(),
+                phone: Some("0500000000".into()),
+                address: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(y.name, "عيادة محدثة");
+        deactivate_clinic(&c, x.id).unwrap();
+        assert!(list_clinics(&c).unwrap().is_empty())
+    }
+    #[test]
+    fn doctor_update_and_deactivate_work() {
+        let c = db();
+        let cl = create_clinic(
+            &c,
+            ClinicInput {
+                name: "عيادة".into(),
+                phone: None,
+                address: None,
+            },
+        )
+        .unwrap();
+        let d = create_doctor(
+            &c,
+            DoctorInput {
+                clinic_id: Some(cl.id),
+                name: "طبيب أول".into(),
+                specialty: None,
+                phone: None,
+            },
+        )
+        .unwrap();
+        let u = update_doctor(
+            &c,
+            d.id,
+            DoctorInput {
+                clinic_id: Some(cl.id),
+                name: "طبيب محدث".into(),
+                specialty: Some("باطنية".into()),
+                phone: None,
+            },
+        )
+        .unwrap();
+        assert_eq!(u.name, "طبيب محدث");
+        deactivate_doctor(&c, d.id).unwrap();
+        assert!(list_doctors(&c).unwrap().is_empty())
+    }
+    #[test]
+    fn doctor_rejects_inactive_clinic() {
+        let c = db();
+        let cl = create_clinic(
+            &c,
+            ClinicInput {
+                name: "عيادة".into(),
+                phone: None,
+                address: None,
+            },
+        )
+        .unwrap();
+        deactivate_clinic(&c, cl.id).unwrap();
+        assert!(create_doctor(
+            &c,
+            DoctorInput {
+                clinic_id: Some(cl.id),
+                name: "طبيب".into(),
+                specialty: None,
+                phone: None
+            }
+        )
+        .is_err())
+    }
+}
