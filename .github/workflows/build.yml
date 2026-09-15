@@ -21,11 +21,21 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
       - name: Install dependencies
-        shell: bash
-        run: |
-          if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
+        run: npm ci
       - run: npm run build
+
+  frontend-lockfile:
+    name: Frontend lockfile integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
 
   rust-check:
     name: Rust check
@@ -33,15 +43,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo check --manifest-path src-tauri/Cargo.toml
+      - run: cargo check --manifest-path src-tauri/Cargo.toml --locked
 
-  rust-tests:
-    name: Rust tests
+  rust-tests-windows:
+    name: Rust tests (Windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  rust-tests-linux:
+    name: Rust tests (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
   rust-clippy:
     name: Rust clippy
@@ -51,7 +69,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
 
   rust-format:
     name: Rust format
@@ -63,17 +81,81 @@ jobs:
           components: rustfmt
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
+  migration-tests:
+    name: SQLite migration tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked migration_tests -- --nocapture
+
+  attachment-tests:
+    name: Attachment safety tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked attachments::tests -- --nocapture
+
+  scheduling-tests:
+    name: Scheduling tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked scheduling::tests -- --nocapture
+
+  appointment-tests:
+    name: Appointment tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked appointments::tests -- --nocapture
+
+  patient-tests:
+    name: Patient tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --locked patients::tests -- --nocapture
+
   gate:
     name: All checks passed
     if: always()
-    needs: [frontend-build, rust-check, rust-tests, rust-clippy, rust-format]
+    needs:
+      - frontend-build
+      - frontend-lockfile
+      - rust-check
+      - rust-tests-windows
+      - rust-tests-linux
+      - rust-clippy
+      - rust-format
+      - migration-tests
+      - attachment-tests
+      - scheduling-tests
+      - appointment-tests
+      - patient-tests
     runs-on: ubuntu-latest
     steps:
       - name: Enforce green gate
+        env:
+          RESULTS: >-
+            ${{ needs.frontend-build.result }}
+            ${{ needs.frontend-lockfile.result }}
+            ${{ needs.rust-check.result }}
+            ${{ needs.rust-tests-windows.result }}
+            ${{ needs.rust-tests-linux.result }}
+            ${{ needs.rust-clippy.result }}
+            ${{ needs.rust-format.result }}
+            ${{ needs.migration-tests.result }}
+            ${{ needs.attachment-tests.result }}
+            ${{ needs.scheduling-tests.result }}
+            ${{ needs.appointment-tests.result }}
+            ${{ needs.patient-tests.result }}
         shell: bash
         run: |
-          test "${{ needs.frontend-build.result }}" = "success"
-          test "${{ needs.rust-check.result }}" = "success"
-          test "${{ needs.rust-tests.result }}" = "success"
-          test "${{ needs.rust-clippy.result }}" = "success"
-          test "${{ needs.rust-format.result }}" = "success"
+          for result in $RESULTS; do
+            test "$result" = "success"
+          done
