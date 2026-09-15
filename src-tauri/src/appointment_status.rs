@@ -22,7 +22,9 @@ pub fn transition_allowed(from: &str, to: &str) -> bool {
 pub fn set_status(c: &mut Connection, id: i64, to: &str) -> Result<(), String> {
     let tx = c.transaction().map_err(|e| e.to_string())?;
     let from: Option<String> = tx
-        .query_row("SELECT status FROM appointments WHERE id=?1", [id], |r| r.get(0))
+        .query_row("SELECT status FROM appointments WHERE id=?1", [id], |r| {
+            r.get(0)
+        })
         .optional()
         .map_err(|e| e.to_string())?;
     let from = from.ok_or_else(|| "الموعد غير موجود".to_string())?;
@@ -98,8 +100,18 @@ mod tests {
         set_status(&mut c, 1, "arrived").unwrap();
         set_status(&mut c, 1, "in_progress").unwrap();
         set_status(&mut c, 1, "completed").unwrap();
-        let status: String = c.query_row("SELECT status FROM appointments WHERE id=1", [], |r| r.get(0)).unwrap();
-        let audit_count: i64 = c.query_row("SELECT COUNT(*) FROM audit_log WHERE entity_id=1 AND event_type='status'", [], |r| r.get(0)).unwrap();
+        let status: String = c
+            .query_row("SELECT status FROM appointments WHERE id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let audit_count: i64 = c
+            .query_row(
+                "SELECT COUNT(*) FROM audit_log WHERE entity_id=1 AND event_type='status'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(status, "completed");
         assert_eq!(audit_count, 3);
     }
@@ -112,7 +124,11 @@ mod tests {
         set_status(&mut c, 1, "in_progress").unwrap();
         set_status(&mut c, 1, "completed").unwrap();
         assert!(set_status(&mut c, 1, "scheduled").is_err());
-        let status: String = c.query_row("SELECT status FROM appointments WHERE id=1", [], |r| r.get(0)).unwrap();
+        let status: String = c
+            .query_row("SELECT status FROM appointments WHERE id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(status, "completed");
     }
 }
