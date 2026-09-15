@@ -35,11 +35,47 @@ jobs:
           node-version: 22
       - run: npm install --ignore-scripts
 
+  frontend-typescript:
+    name: Frontend TypeScript strict check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts
+      - run: npx tsc --noEmit
+
+  frontend-production-bundle:
+    name: Frontend production bundle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --ignore-scripts
+      - run: npm run build
+
   rust-check:
     name: Rust check
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --manifest-path src-tauri/Cargo.toml
+
+  rust-check-linux:
+    name: Rust check (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf imagemagick
+      - name: Generate RGBA Linux Tauri icon
+        run: convert 'src-tauri/icons/icon.ico[0]' -alpha on -channel RGBA -depth 8 PNG32:src-tauri/icons/icon.png
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo check --manifest-path src-tauri/Cargo.toml
 
@@ -67,11 +103,35 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
+  rust-tests-release:
+    name: Rust tests (release profile)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --release --manifest-path src-tauri/Cargo.toml
+
   rust-clippy:
     name: Rust clippy
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+  rust-clippy-linux:
+    name: Rust clippy (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf imagemagick
+      - name: Generate RGBA Linux Tauri icon
+        run: convert 'src-tauri/icons/icon.ico[0]' -alpha on -channel RGBA -depth 8 PNG32:src-tauri/icons/icon.png
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -127,22 +187,54 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --manifest-path src-tauri/Cargo.toml patients::tests -- --nocapture
 
+  visit-tracking-tests:
+    name: Visit tracking tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml visit_tracking -- --nocapture
+
+  database-tests:
+    name: Database integrity tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml database -- --nocapture
+
+  security-tests:
+    name: Security regression tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml security -- --nocapture
+
   gate:
     name: All checks passed
     if: always()
     needs:
       - frontend-build
       - frontend-dependency-resolution
+      - frontend-typescript
+      - frontend-production-bundle
       - rust-check
+      - rust-check-linux
       - rust-tests-windows
       - rust-tests-linux
+      - rust-tests-release
       - rust-clippy
+      - rust-clippy-linux
       - rust-format
       - migration-tests
       - attachment-tests
       - scheduling-tests
       - appointment-tests
       - patient-tests
+      - visit-tracking-tests
+      - database-tests
+      - security-tests
     runs-on: ubuntu-latest
     steps:
       - name: Enforce green gate
@@ -150,16 +242,24 @@ jobs:
           RESULTS: >-
             ${{ needs.frontend-build.result }}
             ${{ needs.frontend-dependency-resolution.result }}
+            ${{ needs.frontend-typescript.result }}
+            ${{ needs.frontend-production-bundle.result }}
             ${{ needs.rust-check.result }}
+            ${{ needs.rust-check-linux.result }}
             ${{ needs.rust-tests-windows.result }}
             ${{ needs.rust-tests-linux.result }}
+            ${{ needs.rust-tests-release.result }}
             ${{ needs.rust-clippy.result }}
+            ${{ needs.rust-clippy-linux.result }}
             ${{ needs.rust-format.result }}
             ${{ needs.migration-tests.result }}
             ${{ needs.attachment-tests.result }}
             ${{ needs.scheduling-tests.result }}
             ${{ needs.appointment-tests.result }}
             ${{ needs.patient-tests.result }}
+            ${{ needs.visit-tracking-tests.result }}
+            ${{ needs.database-tests.result }}
+            ${{ needs.security-tests.result }}
         shell: bash
         run: |
           for result in $RESULTS; do
