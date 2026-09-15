@@ -1,7 +1,7 @@
 pub mod domain;pub mod patients;pub mod directory;pub mod appointments;
 use rusqlite::Connection;use std::{fs,path::PathBuf,sync::Mutex};use tauri::Manager;
 pub struct Db(pub Mutex<Connection>);
-fn init_db(path:&PathBuf)->Result<Connection,String>{if let Some(p)=path.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?;}let db=Connection::open(path).map_err(|e|e.to_string())?;db.execute_batch(include_str!("../migrations/001_init.sql")).map_err(|e|e.to_string())?;db.execute_batch(include_str!("../migrations/002_touch_triggers.sql")).map_err(|e|e.to_string())?;Ok(db)}
+fn init_db(path:&PathBuf)->Result<Connection,String>{if let Some(p)=path.parent(){fs::create_dir_all(p).map_err(|e|e.to_string())?;}let db=Connection::open(path).map_err(|e|e.to_string())?;db.execute_batch(include_str!("../migrations/001_init.sql")).map_err(|e|e.to_string())?;db.execute_batch(include_str!("../migrations/002_touch_triggers.sql")).map_err(|e|e.to_string())?;db.execute_batch(include_str!("../migrations/003_scheduling_rules.sql")).map_err(|e|e.to_string())?;Ok(db)}
 fn with_db<T>(db:&tauri::State<Db>,f:impl FnOnce(&Connection)->Result<T,String>)->Result<T,String>{let g=db.0.lock().map_err(|_|"تعذر الوصول إلى قاعدة البيانات".to_string())?;f(&g)}
 #[tauri::command]fn health()->&'static str{"ok"}
 #[tauri::command]fn patient_list(db:tauri::State<Db>,query:Option<String>,limit:Option<i64>)->Result<Vec<patients::Patient>,String>{with_db(&db,|c|patients::list(c,query,limit.unwrap_or(50)))}
