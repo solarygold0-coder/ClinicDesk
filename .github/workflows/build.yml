@@ -59,7 +59,9 @@ jobs:
       - name: Install Tauri Linux system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf imagemagick
+      - name: Generate Linux Tauri icon from canonical Windows icon
+        run: convert 'src-tauri/icons/icon.ico[0]' src-tauri/icons/icon.png
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
