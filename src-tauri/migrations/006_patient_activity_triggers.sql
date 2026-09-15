@@ -1,15 +1,15 @@
 UPDATE patients
 SET last_activity_at = MAX(
-    COALESCE(updated_at, created_at),
+    datetime(COALESCE(updated_at, created_at)),
     COALESCE(
         (
-            SELECT MAX(a.starts_at)
+            SELECT MAX(datetime(a.starts_at))
             FROM appointments a
             WHERE a.patient_id = patients.id
-              AND a.starts_at <= CURRENT_TIMESTAMP
+              AND datetime(a.starts_at) <= CURRENT_TIMESTAMP
               AND a.status IN ('arrived','in_progress','completed','no_show')
         ),
-        created_at
+        datetime(created_at)
     )
 )
 WHERE deleted_at IS NULL;
