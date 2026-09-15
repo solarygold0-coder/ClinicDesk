@@ -1,1 +1,3 @@
-fn main(){clinicdesk_lib::run();}
+fn main() {
+    clinicdesk_lib::run();
+}

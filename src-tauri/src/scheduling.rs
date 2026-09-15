@@ -94,7 +94,8 @@ pub fn closures(c: &Connection) -> Result<Vec<ClosureDate>, String> {
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn add_closure(c: &Connection, i: ClosureInput) -> Result<(), String> {
