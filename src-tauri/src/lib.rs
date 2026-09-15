@@ -77,9 +77,10 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
 #[tauri::command]
@@ -127,9 +128,10 @@ fn patient_create(
     db: tauri::State<Db>,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     patients::create(&mut g, input)
 }
 #[tauri::command]
@@ -193,7 +195,9 @@ fn appointment_upcoming_all(
     db: tauri::State<Db>,
     from: String,
 ) -> Result<Vec<appointments::Appointment>, String> {
-    with_db(&db, |c| appointments::list(c, &from, "9999-12-31T23:59:59"))
+    with_db(&db, |c| {
+        appointments::list(c, &from, "9999-12-31T23:59:59")
+    })
 }
 #[tauri::command]
 fn patient_appointments(
@@ -210,9 +214,10 @@ fn appointment_create(
     db: tauri::State<Db>,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::create(&mut g, input)
 }
 #[tauri::command]
@@ -221,9 +226,10 @@ fn appointment_update(
     id: i64,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::update(&mut g, id, input)
 }
 #[tauri::command]
