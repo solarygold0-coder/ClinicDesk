@@ -18,6 +18,17 @@ fn init_db(path: &PathBuf) -> Result<Connection, String> {
         .map_err(|e| e.to_string())?;
     db.execute_batch(include_str!("../migrations/003_scheduling_rules.sql"))
         .map_err(|e| e.to_string())?;
+    let schema_version: i64 = db
+        .query_row(
+            "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if schema_version < 4 {
+        db.execute_batch(include_str!("../migrations/004_patient_medical_details.sql"))
+            .map_err(|e| e.to_string())?;
+    }
     Ok(db)
 }
 fn with_db<T>(
