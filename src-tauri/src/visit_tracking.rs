@@ -24,8 +24,7 @@ fn validate(input: &VisitTrackingInput) -> Result<(), String> {
     if !["new", "follow_up", "renewal"].contains(&input.visit_type.as_str()) {
         return Err("نوع الزيارة غير صالح".into());
     }
-    if !["scheduled", "reception", "with_doctor", "completed"]
-        .contains(&input.visit_stage.as_str())
+    if !["scheduled", "reception", "with_doctor", "completed"].contains(&input.visit_stage.as_str())
     {
         return Err("مرحلة الزيارة غير صالحة".into());
     }
@@ -92,10 +91,15 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(include_str!("../migrations/001_init.sql"))
             .unwrap();
-        c.execute_batch(include_str!("../migrations/007_appointment_visit_tracking.sql"))
-            .unwrap();
-        c.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
-            .unwrap();
+        c.execute_batch(include_str!(
+            "../migrations/007_appointment_visit_tracking.sql"
+        ))
+        .unwrap();
+        c.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+            [],
+        )
+        .unwrap();
         c.execute("INSERT INTO appointments(patient_id,starts_at,ends_at) VALUES(1,'2026-09-20T10:00:00','2026-09-20T10:30:00')", [])
             .unwrap();
         c
