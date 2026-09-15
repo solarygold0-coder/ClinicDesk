@@ -10,31 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  rustfmt-autofix:
-    name: Rustfmt autofix
-    if: github.event_name == 'push' && github.ref == 'refs/heads/tauri-react-rebuild'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: tauri-react-rebuild
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - name: Apply and push rustfmt
-        shell: bash
-        run: |
-          cargo fmt --manifest-path src-tauri/Cargo.toml --all
-          if git diff --quiet; then exit 0; fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src-tauri/src
-          git commit -m "style: apply rustfmt"
-          git push origin HEAD:tauri-react-rebuild
-
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-latest
