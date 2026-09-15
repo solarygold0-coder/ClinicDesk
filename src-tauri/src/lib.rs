@@ -91,10 +91,9 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
 
@@ -153,10 +152,9 @@ fn patient_create(
     db: tauri::State<Db>,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     patients::create(&mut g, input)
 }
 
@@ -279,10 +277,9 @@ fn appointment_create(
     db: tauri::State<Db>,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::create(&mut g, input)
 }
 
@@ -292,19 +289,17 @@ fn appointment_update(
     id: i64,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::update(&mut g, id, input)
 }
 
 #[tauri::command]
 fn appointment_status(db: tauri::State<Db>, id: i64, status: String) -> Result<(), String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointment_status::set_status(&mut g, id, &status)
 }
 
