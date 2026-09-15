@@ -35,7 +35,8 @@ pub fn list(conn: &Connection, patient_id: i64) -> Result<Vec<Attachment>, Strin
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn add(
@@ -66,7 +67,14 @@ pub fn add(
     conn.execute(
         "INSERT INTO attachments(patient_id,stored_name,original_name,mime_type,size_bytes,sha256)
          VALUES(?1,?2,?3,?4,?5,?6)",
-        params![patient_id, stored_name, original_name, mime_type, size_bytes, sha256],
+        params![
+            patient_id,
+            stored_name,
+            original_name,
+            mime_type,
+            size_bytes,
+            sha256
+        ],
     )
     .map_err(|e| e.to_string())?;
     let id = conn.last_insert_rowid();
@@ -104,7 +112,8 @@ mod tests {
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(include_str!("../migrations/001_init.sql")).unwrap();
+        conn.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
         conn.execute(
             "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
             [],
