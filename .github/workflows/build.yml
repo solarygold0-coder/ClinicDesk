@@ -60,8 +60,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf imagemagick
-      - name: Generate Linux Tauri icon from canonical Windows icon
-        run: convert 'src-tauri/icons/icon.ico[0]' src-tauri/icons/icon.png
+      - name: Generate RGBA Linux Tauri icon from canonical Windows icon
+        run: |
+          convert 'src-tauri/icons/icon.ico[0]' -alpha on -channel RGBA -depth 8 PNG32:src-tauri/icons/icon.png
+          identify -verbose src-tauri/icons/icon.png | grep -E 'Type: TrueColorAlpha|Alpha:'
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --manifest-path src-tauri/Cargo.toml
 
