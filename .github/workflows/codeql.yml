@@ -39,7 +39,11 @@ jobs:
       - name: Ensure Tauri icon exists for analysis build
         if: matrix.language == 'rust'
         run: |
-          test -f src-tauri/icons/icon.png || cp public/vite.svg src-tauri/icons/icon.png
+          if [ ! -f src-tauri/icons/icon.png ]; then
+            mkdir -p src-tauri/icons
+            printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' | base64 --decode > src-tauri/icons/icon.png
+          fi
+          test -s src-tauri/icons/icon.png
 
       - name: Set up Rust
         if: matrix.language == 'rust'
