@@ -11,7 +11,11 @@ pub struct SecurityState {
 
 pub fn state(c: &Connection) -> Result<SecurityState, String> {
     let enabled: i64 = c
-        .query_row("SELECT auth_enabled FROM security_settings WHERE id=1", [], |r| r.get(0))
+        .query_row(
+            "SELECT auth_enabled FROM security_settings WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
     let user_count: i64 = c
         .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
@@ -29,8 +33,10 @@ mod tests {
 
     fn db() -> Connection {
         let c = Connection::open_in_memory().unwrap();
-        c.execute_batch(include_str!("../migrations/001_init.sql")).unwrap();
-        c.execute_batch(include_str!("../migrations/008_optional_auth.sql")).unwrap();
+        c.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        c.execute_batch(include_str!("../migrations/008_optional_auth.sql"))
+            .unwrap();
         c
     }
 
@@ -47,7 +53,11 @@ mod tests {
     fn schema_does_not_create_a_default_admin() {
         let c = db();
         let admins: i64 = c
-            .query_row("SELECT COUNT(*) FROM users WHERE is_system_admin=1", [], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE is_system_admin=1",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(admins, 0);
     }
