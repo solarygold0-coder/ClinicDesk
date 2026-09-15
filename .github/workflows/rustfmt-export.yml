@@ -1,0 +1,28 @@
+name: Rustfmt Export
+
+on:
+  push:
+    branches: [tauri-react-rebuild]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  format-export:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Format Rust sources
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
+      - name: Upload formatted Rust sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustfmt-sources
+          path: |
+            src-tauri/build.rs
+            src-tauri/src/*.rs
+          if-no-files-found: error
