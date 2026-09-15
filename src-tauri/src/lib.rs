@@ -55,6 +55,17 @@ fn patient_list(
     with_db(&db, |c| patients::list(c, query, limit.unwrap_or(50)))
 }
 #[tauri::command]
+fn patient_count(db: tauri::State<Db>) -> Result<i64, String> {
+    with_db(&db, |c| {
+        c.query_row(
+            "SELECT COUNT(*) FROM patients WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+    })
+}
+#[tauri::command]
 fn patient_by_file_no(
     db: tauri::State<Db>,
     file_no: i64,
@@ -197,6 +208,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             health,
             patient_list,
+            patient_count,
             patient_by_file_no,
             patient_inactive,
             patient_create,
