@@ -37,9 +37,10 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
 #[tauri::command]
@@ -62,13 +63,24 @@ fn patient_by_file_no(
     with_db(&db, |c| patients::get_by_file_no(c, file_no))
 }
 #[tauri::command]
+fn patient_inactive(
+    db: tauri::State<Db>,
+    years: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<patients::Patient>, String> {
+    with_db(&db, |c| {
+        patients::inactive_for_years(c, years.unwrap_or(10), limit.unwrap_or(100))
+    })
+}
+#[tauri::command]
 fn patient_create(
     db: tauri::State<Db>,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     patients::create(&mut g, input)
 }
 #[tauri::command]
@@ -132,9 +144,10 @@ fn appointment_create(
     db: tauri::State<Db>,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::create(&mut g, input)
 }
 #[tauri::command]
@@ -143,9 +156,10 @@ fn appointment_update(
     id: i64,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::update(&mut g, id, input)
 }
 #[tauri::command]
@@ -188,6 +202,7 @@ pub fn run() {
             health,
             patient_list,
             patient_by_file_no,
+            patient_inactive,
             patient_create,
             patient_update,
             patient_delete,
