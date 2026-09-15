@@ -145,10 +145,7 @@ fn appointment_missed_history(
 ) -> Result<Vec<appointments::Appointment>, String> {
     with_db(&db, |c| {
         let rows = appointments::list(c, "1900-01-01T00:00:00", &to)?;
-        Ok(rows
-            .into_iter()
-            .filter(|a| a.status == "no_show")
-            .collect())
+        Ok(rows.into_iter().filter(|a| a.status == "no_show").collect())
     })
 }
 #[tauri::command]
