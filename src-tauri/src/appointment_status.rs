@@ -1,3 +1,5 @@
+use rusqlite::{params, Connection, OptionalExtension};
+
 /// Defines the only status transitions allowed by the scheduling workflow.
 /// Keeping this policy separate makes it reusable by the local backend and
 /// the future network API service.
@@ -14,9 +16,50 @@ pub fn transition_allowed(from: &str, to: &str) -> bool {
     }
 }
 
+/// Changes an appointment status only when the requested transition is valid.
+/// The read, validation, update and audit entry happen in one transaction so
+/// this rule can later be moved unchanged behind the network API boundary.
+pub fn set_status(c: &mut Connection, id: i64, to: &str) -> Result<(), String> {
+    let tx = c.transaction().map_err(|e| e.to_string())?;
+    let from: Option<String> = tx
+        .query_row("SELECT status FROM appointments WHERE id=?1", [id], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let from = from.ok_or_else(|| "الموعد غير موجود".to_string())?;
+    if !transition_allowed(&from, to) {
+        return Err(format!("لا يمكن تغيير حالة الموعد من {from} إلى {to}"));
+    }
+    if from == to {
+        return Ok(());
+    }
+    tx.execute(
+        "UPDATE appointments SET status=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2",
+        params![to, id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO audit_log(event_type,entity_type,entity_id,details_json)VALUES('status','appointment',?1,?2)",
+        params![id, format!("{{\"from\":\"{from}\",\"to\":\"{to}\"}}")],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::transition_allowed;
+    use super::{set_status, transition_allowed};
+    use rusqlite::Connection;
+
+    fn db() -> Connection {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch(
+            "CREATE TABLE appointments(id INTEGER PRIMARY KEY,status TEXT NOT NULL,updated_at TEXT);
+             CREATE TABLE audit_log(id INTEGER PRIMARY KEY,event_type TEXT,entity_type TEXT,entity_id INTEGER,details_json TEXT);
+             INSERT INTO appointments(id,status) VALUES(1,'scheduled');",
+        )
+        .unwrap();
+        c
+    }
 
     #[test]
     fn normal_visit_flow_is_allowed() {
@@ -47,5 +90,29 @@ mod tests {
         assert!(transition_allowed("arrived", "cancelled"));
         assert!(transition_allowed("in_progress", "cancelled"));
         assert!(!transition_allowed("arrived", "no_show"));
+    }
+
+    #[test]
+    fn database_enforces_full_visit_flow_and_audits_it() {
+        let mut c = db();
+        set_status(&mut c, 1, "arrived").unwrap();
+        set_status(&mut c, 1, "in_progress").unwrap();
+        set_status(&mut c, 1, "completed").unwrap();
+        let status: String = c.query_row("SELECT status FROM appointments WHERE id=1", [], |r| r.get(0)).unwrap();
+        let audit_count: i64 = c.query_row("SELECT COUNT(*) FROM audit_log WHERE entity_id=1 AND event_type='status'", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "completed");
+        assert_eq!(audit_count, 3);
+    }
+
+    #[test]
+    fn database_blocks_skipping_and_terminal_reopen() {
+        let mut c = db();
+        assert!(set_status(&mut c, 1, "completed").is_err());
+        set_status(&mut c, 1, "arrived").unwrap();
+        set_status(&mut c, 1, "in_progress").unwrap();
+        set_status(&mut c, 1, "completed").unwrap();
+        assert!(set_status(&mut c, 1, "scheduled").is_err());
+        let status: String = c.query_row("SELECT status FROM appointments WHERE id=1", [], |r| r.get(0)).unwrap();
+        assert_eq!(status, "completed");
     }
 }
