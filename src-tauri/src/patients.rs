@@ -243,8 +243,10 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(include_str!("../migrations/001_init.sql"))
             .unwrap();
-        c.execute_batch(include_str!("../migrations/004_patient_medical_details.sql"))
-            .unwrap();
+        c.execute_batch(include_str!(
+            "../migrations/004_patient_medical_details.sql"
+        ))
+        .unwrap();
         c
     }
 
