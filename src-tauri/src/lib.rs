@@ -149,6 +149,13 @@ fn appointment_missed_history(
     })
 }
 #[tauri::command]
+fn appointment_upcoming_all(
+    db: tauri::State<Db>,
+    from: String,
+) -> Result<Vec<appointments::Appointment>, String> {
+    with_db(&db, |c| appointments::list(c, &from, "9999-12-31T23:59:59"))
+}
+#[tauri::command]
 fn patient_appointments(
     db: tauri::State<Db>,
     patient_id: i64,
@@ -231,6 +238,7 @@ pub fn run() {
             doctor_create,
             appointment_list,
             appointment_missed_history,
+            appointment_upcoming_all,
             patient_appointments,
             appointment_create,
             appointment_update,
