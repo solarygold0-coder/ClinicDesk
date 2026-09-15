@@ -26,8 +26,10 @@ fn init_db(path: &PathBuf) -> Result<Connection, String> {
         )
         .map_err(|e| e.to_string())?;
     if schema_version < 4 {
-        db.execute_batch(include_str!("../migrations/004_patient_medical_details.sql"))
-            .map_err(|e| e.to_string())?;
+        db.execute_batch(include_str!(
+            "../migrations/004_patient_medical_details.sql"
+        ))
+        .map_err(|e| e.to_string())?;
     }
     Ok(db)
 }
