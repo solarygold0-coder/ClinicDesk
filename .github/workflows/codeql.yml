@@ -36,14 +36,48 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
-      - name: Ensure Tauri icon exists for analysis build
+      - name: Ensure Tauri RGBA icon exists for analysis build
         if: matrix.language == 'rust'
         run: |
-          if [ ! -f src-tauri/icons/icon.png ]; then
-            mkdir -p src-tauri/icons
-            printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=' | base64 --decode > src-tauri/icons/icon.png
-          fi
-          test -s src-tauri/icons/icon.png
+          mkdir -p src-tauri/icons
+          python3 - <<'PY'
+          import struct
+          import zlib
+          from pathlib import Path
+
+          def chunk(kind: bytes, data: bytes) -> bytes:
+              return (
+                  struct.pack('>I', len(data))
+                  + kind
+                  + data
+                  + struct.pack('>I', zlib.crc32(kind + data) & 0xffffffff)
+              )
+
+          width = height = 32
+          # PNG color type 6 = truecolor with alpha (RGBA), 8 bits/channel.
+          ihdr = struct.pack('>IIBBBBB', width, height, 8, 6, 0, 0, 0)
+          # Opaque neutral pixels. Each scanline starts with filter byte 0.
+          pixel = bytes((32, 32, 32, 255))
+          raw = b''.join(b'\x00' + pixel * width for _ in range(height))
+          png = (
+              b'\x89PNG\r\n\x1a\n'
+              + chunk(b'IHDR', ihdr)
+              + chunk(b'IDAT', zlib.compress(raw, 9))
+              + chunk(b'IEND', b'')
+          )
+          Path('src-tauri/icons/icon.png').write_bytes(png)
+          PY
+          python3 - <<'PY'
+          import struct
+          from pathlib import Path
+          data = Path('src-tauri/icons/icon.png').read_bytes()
+          assert data[:8] == b'\x89PNG\r\n\x1a\n'
+          width, height, bit_depth, color_type = struct.unpack('>IIBB', data[16:26])
+          assert width > 0 and height > 0
+          assert bit_depth == 8
+          assert color_type == 6, f'expected RGBA PNG color type 6, got {color_type}'
+          print(f'Validated RGBA PNG: {width}x{height}, 8-bit, color type {color_type}')
+          PY
 
       - name: Set up Rust
         if: matrix.language == 'rust'
