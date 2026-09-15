@@ -81,7 +81,7 @@ pub fn add(
     conn.execute(
         "INSERT INTO audit_log(event_type,entity_type,entity_id,details_json)
          VALUES('attachment_added','patient',?1,?2)",
-        params![patient_id, format!("{\"attachmentId\":{id}}")],
+        params![patient_id, format!(r#"{{"attachmentId":{id}}}"#)],
     )
     .map_err(|e| e.to_string())?;
     Ok(id)
@@ -100,7 +100,7 @@ pub fn remove(conn: &Connection, id: i64) -> Result<String, String> {
     conn.execute(
         "INSERT INTO audit_log(event_type,entity_type,entity_id,details_json)
          VALUES('attachment_removed','patient',?1,?2)",
-        params![patient_id, format!("{\"attachmentId\":{id}}")],
+        params![patient_id, format!(r#"{{"attachmentId":{id}}}"#)],
     )
     .map_err(|e| e.to_string())?;
     Ok(stored_name)
