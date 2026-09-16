@@ -617,11 +617,20 @@ mod migration_tests {
         )
         .unwrap();
         assert!(db
-            .execute("UPDATE users SET employee_code='U999999' WHERE username='u1'", [])
+            .execute(
+                "UPDATE users SET employee_code='U999999' WHERE username='u1'",
+                []
+            )
             .is_err());
-        assert!(db.execute("DELETE FROM users WHERE username='u1'", []).is_err());
+        assert!(db
+            .execute("DELETE FROM users WHERE username='u1'", [])
+            .is_err());
         let code: String = db
-            .query_row("SELECT employee_code FROM users WHERE username='u1'", [], |r| r.get(0))
+            .query_row(
+                "SELECT employee_code FROM users WHERE username='u1'",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(code, "U000001");
     }
