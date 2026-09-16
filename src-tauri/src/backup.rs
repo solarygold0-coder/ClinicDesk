@@ -133,6 +133,55 @@ pub fn create_attachment_backup(
     result
 }
 
+pub fn restore_attachment_backup(database_path: &Path, attachment_root: &Path) -> Result<(), String> {
+    verify_attachment_backup(database_path)?;
+    let source = attachment_sidecar(database_path);
+    let parent = attachment_root
+        .parent()
+        .ok_or_else(|| "مسار مجلد المرفقات غير صالح".to_string())?;
+    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let staged = parent.join(format!("attachments-restore-{}", Uuid::new_v4()));
+    let rollback = parent.join(format!("attachments-before-restore-{}", Uuid::new_v4()));
+    fs::create_dir_all(&staged).map_err(|e| e.to_string())?;
+
+    let copy_result = (|| {
+        for entry in fs::read_dir(&source).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name();
+            let name = name
+                .to_str()
+                .ok_or_else(|| "اسم مرفق غير صالح داخل النسخة الاحتياطية".to_string())?;
+            safe_attachment_name(name)?;
+            if !entry.file_type().map_err(|e| e.to_string())?.is_file() {
+                return Err("النسخة الاحتياطية للمرفقات تحتوي عنصراً غير صالح".into());
+            }
+            fs::copy(entry.path(), staged.join(name)).map_err(|e| e.to_string())?;
+        }
+        Ok::<(), String>(())
+    })();
+    if let Err(e) = copy_result {
+        let _ = fs::remove_dir_all(&staged);
+        return Err(e);
+    }
+
+    let had_live = attachment_root.exists();
+    if had_live {
+        fs::rename(attachment_root, &rollback)
+            .map_err(|e| format!("تعذر تجهيز المرفقات للاستعادة: {e}"))?;
+    }
+    if let Err(e) = fs::rename(&staged, attachment_root) {
+        if had_live {
+            let _ = fs::rename(&rollback, attachment_root);
+        }
+        let _ = fs::remove_dir_all(&staged);
+        return Err(format!("تعذرت استعادة المرفقات: {e}"));
+    }
+    if had_live {
+        let _ = fs::remove_dir_all(&rollback);
+    }
+    Ok(())
+}
+
 pub fn create_database_backup(
     conn: &Connection,
     destination: &Path,
@@ -304,25 +353,55 @@ mod tests {
     }
 
     #[test]
+    fn attachment_restore_replaces_live_files() {
+        let source = temp("attachment-restore-source");
+        let backup = temp("attachment-restore-backup");
+        let source_root = attachment_sidecar(&source);
+        let live_root = attachment_sidecar(&temp("attachment-live"));
+        fs::create_dir_all(&source_root).unwrap();
+        fs::create_dir_all(&live_root).unwrap();
+        fs::write(live_root.join("old.pdf"), b"old").unwrap();
+        let bytes = b"restored attachment";
+        let stored_name = "restored.pdf";
+        fs::write(source_root.join(stored_name), bytes).unwrap();
+        let conn = Connection::open(&source).unwrap();
+        super::super::migrate_db(&conn).unwrap();
+        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
+            .unwrap();
+        let patient_id = conn.last_insert_rowid();
+        let hash = format!("{:x}", Sha256::digest(bytes));
+        conn.execute(
+            "INSERT INTO attachments(patient_id,stored_name,original_name,size_bytes,sha256) VALUES(?1,?2,'restored.pdf',?3,?4)",
+            rusqlite::params![patient_id, stored_name, bytes.len() as i64, hash],
+        )
+        .unwrap();
+        create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
+        create_attachment_backup(&conn, &source_root, &backup).unwrap();
+        restore_attachment_backup(&backup, &live_root).unwrap();
+        assert_eq!(fs::read(live_root.join(stored_name)).unwrap(), bytes);
+        assert!(!live_root.join("old.pdf").exists());
+        drop(conn);
+        let _ = fs::remove_file(source);
+        let _ = fs::remove_file(&backup);
+        let _ = fs::remove_dir_all(source_root);
+        let _ = fs::remove_dir_all(attachment_sidecar(&backup));
+        let _ = fs::remove_dir_all(live_root);
+    }
+
+    #[test]
     fn restore_replaces_existing_live_database() {
         let live = temp("live");
         let source = temp("restore-source");
         let mut current = Connection::open(&live).unwrap();
         super::super::migrate_db(&current).unwrap();
         current
-            .execute(
-                "INSERT INTO patients(file_no,full_name) VALUES(1,'قديم')",
-                [],
-            )
+            .execute("INSERT INTO patients(file_no,full_name) VALUES(1,'قديم')", [])
             .unwrap();
 
         let source_conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&source_conn).unwrap();
         source_conn
-            .execute(
-                "INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')",
-                [],
-            )
+            .execute("INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')", [])
             .unwrap();
         drop(source_conn);
 
@@ -334,15 +413,11 @@ mod tests {
         )
         .unwrap();
         let name: String = current
-            .query_row("SELECT full_name FROM patients WHERE file_no=2", [], |r| {
-                r.get(0)
-            })
+            .query_row("SELECT full_name FROM patients WHERE file_no=2", [], |r| r.get(0))
             .unwrap();
         assert_eq!(name, "مستعاد");
         let old_count: i64 = current
-            .query_row("SELECT COUNT(*) FROM patients WHERE file_no=1", [], |r| {
-                r.get(0)
-            })
+            .query_row("SELECT COUNT(*) FROM patients WHERE file_no=1", [], |r| r.get(0))
             .unwrap();
         assert_eq!(old_count, 0);
         drop(current);
