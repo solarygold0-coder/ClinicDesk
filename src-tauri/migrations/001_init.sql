@@ -1,0 +1,16 @@
+PRAGMA journal_mode=WAL;
+PRAGMA foreign_keys=ON;
+PRAGMA synchronous=NORMAL;
+CREATE TABLE IF NOT EXISTS app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS clinics(id INTEGER PRIMARY KEY,name TEXT NOT NULL,phone TEXT,address TEXT,is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN(0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS doctors(id INTEGER PRIMARY KEY,clinic_id INTEGER REFERENCES clinics(id) ON DELETE SET NULL,name TEXT NOT NULL,specialty TEXT,phone TEXT,is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN(0,1)),created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS patients(id INTEGER PRIMARY KEY,file_no INTEGER NOT NULL UNIQUE,national_id TEXT,full_name TEXT NOT NULL,phone TEXT,birth_date TEXT,sex TEXT,medical_summary TEXT,deleted_at TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_patients_active_nid ON patients(national_id) WHERE national_id IS NOT NULL AND deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS ix_patients_name ON patients(full_name);
+CREATE INDEX IF NOT EXISTS ix_patients_phone ON patients(phone);
+CREATE TABLE IF NOT EXISTS appointments(id INTEGER PRIMARY KEY,patient_id INTEGER NOT NULL REFERENCES patients(id),clinic_id INTEGER REFERENCES clinics(id),doctor_id INTEGER REFERENCES doctors(id),starts_at TEXT NOT NULL,ends_at TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'scheduled' CHECK(status IN('scheduled','arrived','in_progress','completed','cancelled','no_show')),notes TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,CHECK(ends_at>starts_at));
+CREATE INDEX IF NOT EXISTS ix_appointments_start ON appointments(starts_at);
+CREATE INDEX IF NOT EXISTS ix_appointments_patient ON appointments(patient_id,starts_at);
+CREATE TABLE IF NOT EXISTS attachments(id INTEGER PRIMARY KEY,patient_id INTEGER NOT NULL REFERENCES patients(id),stored_name TEXT NOT NULL,original_name TEXT NOT NULL,mime_type TEXT,size_bytes INTEGER NOT NULL,sha256 TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS audit_log(id INTEGER PRIMARY KEY,event_type TEXT NOT NULL,entity_type TEXT NOT NULL,entity_id INTEGER,details_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+INSERT OR IGNORE INTO app_meta(key,value) VALUES('schema_version','1'),('next_patient_file_no','1');

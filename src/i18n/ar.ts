@@ -1,0 +1,1 @@
+export const ar={dashboard:'لوحة التحكم',patients:'المرضى',appointments:'المواعيد',clinicsDoctors:'العيادات والأطباء',settings:'الإعدادات',newPatient:'مريض جديد',newAppointment:'موعد جديد',search:'بحث سريع'}as const;

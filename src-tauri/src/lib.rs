@@ -1,0 +1,621 @@
+pub mod appointment_status;
+pub mod appointments;
+pub mod attachments;
+pub mod directory;
+pub mod domain;
+pub mod patients;
+pub mod scheduling;
+pub mod visit_tracking;
+pub mod visit_tracking_command;
+
+use rusqlite::Connection;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
+use tauri::Manager;
+
+pub struct Db(pub Mutex<Connection>);
+const LATEST_SCHEMA_VERSION: i64 = 9;
+
+fn schema_version(db: &Connection) -> Result<i64, String> {
+    db.query_row(
+        "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn migrate_db(db: &Connection) -> Result<(), String> {
+    db.execute_batch(include_str!("../migrations/001_init.sql"))
+        .map_err(|e| e.to_string())?;
+    let current = schema_version(db)?;
+    if current > LATEST_SCHEMA_VERSION {
+        return Err(format!(
+            "إصدار قاعدة البيانات {current} أحدث من الإصدار الذي يدعمه البرنامج {LATEST_SCHEMA_VERSION}"
+        ));
+    }
+    for (version, sql) in [
+        (2, include_str!("../migrations/002_touch_triggers.sql")),
+        (3, include_str!("../migrations/003_scheduling_rules.sql")),
+        (
+            4,
+            include_str!("../migrations/004_patient_medical_details.sql"),
+        ),
+        (
+            5,
+            include_str!("../migrations/005_patient_last_activity.sql"),
+        ),
+        (
+            6,
+            include_str!("../migrations/006_patient_activity_triggers.sql"),
+        ),
+        (
+            7,
+            include_str!("../migrations/007_appointment_visit_tracking.sql"),
+        ),
+        (8, include_str!("../migrations/008_optional_auth.sql")),
+        (
+            9,
+            include_str!("../migrations/009_remove_optional_auth.sql"),
+        ),
+    ] {
+        if schema_version(db)? < version {
+            db.execute_batch(sql).map_err(|e| e.to_string())?;
+            let applied = schema_version(db)?;
+            if applied != version {
+                return Err(format!(
+                    "فشل ترحيل قاعدة البيانات إلى الإصدار {version}: الإصدار المسجل {applied}"
+                ));
+            }
+        }
+    }
+    let final_version = schema_version(db)?;
+    if final_version != LATEST_SCHEMA_VERSION {
+        return Err(format!(
+            "إصدار قاعدة البيانات بعد الترحيل {final_version} بدلاً من {LATEST_SCHEMA_VERSION}"
+        ));
+    }
+    Ok(())
+}
+
+fn init_db(path: &PathBuf) -> Result<Connection, String> {
+    if let Some(p) = path.parent() {
+        fs::create_dir_all(p).map_err(|e| e.to_string())?
+    }
+    let db = Connection::open(path).map_err(|e| e.to_string())?;
+    migrate_db(&db)?;
+    Ok(db)
+}
+
+fn with_db<T>(
+    db: &tauri::State<Db>,
+    f: impl FnOnce(&Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    let g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    f(&g)
+}
+
+#[tauri::command]
+fn health() -> &'static str {
+    "ok"
+}
+
+#[tauri::command]
+fn patient_list(
+    db: tauri::State<Db>,
+    query: Option<String>,
+    limit: Option<i64>,
+) -> Result<Vec<patients::Patient>, String> {
+    with_db(&db, |c| patients::list(c, query, limit.unwrap_or(50)))
+}
+
+#[tauri::command]
+fn patient_count(db: tauri::State<Db>) -> Result<i64, String> {
+    with_db(&db, |c| {
+        c.query_row(
+            "SELECT COUNT(*) FROM patients WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+    })
+}
+
+#[tauri::command]
+fn patient_by_file_no(
+    db: tauri::State<Db>,
+    file_no: i64,
+) -> Result<Option<patients::Patient>, String> {
+    with_db(&db, |c| patients::get_by_file_no(c, file_no))
+}
+
+#[tauri::command]
+fn patient_inactive(
+    db: tauri::State<Db>,
+    years: Option<i64>,
+    limit: Option<i64>,
+) -> Result<Vec<patients::Patient>, String> {
+    with_db(&db, |c| {
+        patients::inactive_for_years(c, years.unwrap_or(10), limit.unwrap_or(100))
+    })
+}
+
+#[tauri::command]
+fn patient_create(
+    db: tauri::State<Db>,
+    input: patients::PatientInput,
+) -> Result<patients::Patient, String> {
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    patients::create(&mut g, input)
+}
+
+#[tauri::command]
+fn patient_update(
+    db: tauri::State<Db>,
+    id: i64,
+    input: patients::PatientInput,
+) -> Result<patients::Patient, String> {
+    with_db(&db, |c| patients::update(c, id, input))
+}
+
+#[tauri::command]
+fn patient_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+    with_db(&db, |c| patients::soft_delete(c, id))
+}
+
+#[tauri::command]
+fn patient_future_appointment_count(db: tauri::State<Db>, id: i64) -> Result<i64, String> {
+    with_db(&db, |c| patients::future_appointment_count(c, id))
+}
+
+#[tauri::command]
+fn clinic_list(db: tauri::State<Db>) -> Result<Vec<directory::Clinic>, String> {
+    with_db(&db, directory::list_clinics)
+}
+
+#[tauri::command]
+fn clinic_create(
+    db: tauri::State<Db>,
+    input: directory::ClinicInput,
+) -> Result<directory::Clinic, String> {
+    with_db(&db, |c| directory::create_clinic(c, input))
+}
+
+#[tauri::command]
+fn clinic_update(
+    db: tauri::State<Db>,
+    id: i64,
+    input: directory::ClinicInput,
+) -> Result<directory::Clinic, String> {
+    with_db(&db, |c| directory::update_clinic(c, id, input))
+}
+
+#[tauri::command]
+fn clinic_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+    with_db(&db, |c| directory::deactivate_clinic(c, id))
+}
+
+#[tauri::command]
+fn doctor_list(db: tauri::State<Db>) -> Result<Vec<directory::Doctor>, String> {
+    with_db(&db, directory::list_doctors)
+}
+
+#[tauri::command]
+fn doctor_create(
+    db: tauri::State<Db>,
+    input: directory::DoctorInput,
+) -> Result<directory::Doctor, String> {
+    with_db(&db, |c| directory::create_doctor(c, input))
+}
+
+#[tauri::command]
+fn doctor_update(
+    db: tauri::State<Db>,
+    id: i64,
+    input: directory::DoctorInput,
+) -> Result<directory::Doctor, String> {
+    with_db(&db, |c| directory::update_doctor(c, id, input))
+}
+
+#[tauri::command]
+fn doctor_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+    with_db(&db, |c| directory::deactivate_doctor(c, id))
+}
+
+#[tauri::command]
+fn appointment_list(
+    db: tauri::State<Db>,
+    from: String,
+    to: String,
+) -> Result<Vec<appointments::Appointment>, String> {
+    with_db(&db, |c| appointments::list(c, &from, &to))
+}
+
+#[tauri::command]
+fn appointment_missed_history(
+    db: tauri::State<Db>,
+    to: String,
+) -> Result<Vec<appointments::Appointment>, String> {
+    with_db(&db, |c| {
+        Ok(appointments::list(c, "1900-01-01T00:00:00", &to)?
+            .into_iter()
+            .filter(|a| a.status == "no_show")
+            .collect())
+    })
+}
+
+#[tauri::command]
+fn appointment_upcoming_all(
+    db: tauri::State<Db>,
+    from: String,
+) -> Result<Vec<appointments::Appointment>, String> {
+    with_db(&db, |c| appointments::list(c, &from, "9999-12-31T23:59:59"))
+}
+
+#[tauri::command]
+fn patient_appointments(
+    db: tauri::State<Db>,
+    patient_id: i64,
+    limit: Option<i64>,
+) -> Result<Vec<appointments::Appointment>, String> {
+    with_db(&db, |c| {
+        appointments::list_for_patient(c, patient_id, limit.unwrap_or(30))
+    })
+}
+
+#[tauri::command]
+fn appointment_create(
+    db: tauri::State<Db>,
+    input: appointments::AppointmentInput,
+) -> Result<appointments::Appointment, String> {
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    appointments::create(&mut g, input)
+}
+
+#[tauri::command]
+fn appointment_update(
+    db: tauri::State<Db>,
+    id: i64,
+    input: appointments::AppointmentInput,
+) -> Result<appointments::Appointment, String> {
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    appointments::update(&mut g, id, input)
+}
+
+#[tauri::command]
+fn appointment_status(db: tauri::State<Db>, id: i64, status: String) -> Result<(), String> {
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    appointment_status::set_status(&mut g, id, &status)
+}
+
+#[tauri::command]
+fn visit_tracking_update(
+    db: tauri::State<Db>,
+    id: i64,
+    input: visit_tracking::VisitTrackingInput,
+) -> Result<(), String> {
+    with_db(&db, |c| visit_tracking::update(c, id, input))
+}
+
+#[tauri::command]
+fn visit_follow_ups(
+    db: tauri::State<Db>,
+    from: String,
+    to: String,
+) -> Result<Vec<visit_tracking::FollowUpVisit>, String> {
+    with_db(&db, |c| visit_tracking::follow_ups(c, &from, &to))
+}
+
+#[tauri::command]
+fn attachment_list(
+    db: tauri::State<Db>,
+    patient_id: i64,
+) -> Result<Vec<attachments::Attachment>, String> {
+    with_db(&db, |c| attachments::list(c, patient_id))
+}
+
+fn attachment_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|p| p.join("attachments"))
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn attachment_import(
+    app: tauri::AppHandle,
+    db: tauri::State<Db>,
+    patient_id: i64,
+    source_path: String,
+) -> Result<i64, String> {
+    let root = attachment_root(&app)?;
+    with_db(&db, |c| {
+        attachments::import_file(c, patient_id, Path::new(&source_path), &root)
+    })
+}
+
+#[tauri::command]
+fn attachment_remove(app: tauri::AppHandle, db: tauri::State<Db>, id: i64) -> Result<(), String> {
+    let root = attachment_root(&app)?;
+    with_db(&db, |c| attachments::remove_file(c, id, &root))
+}
+
+#[tauri::command]
+fn scheduling_settings_get(db: tauri::State<Db>) -> Result<scheduling::SchedulingSettings, String> {
+    with_db(&db, scheduling::get)
+}
+
+#[tauri::command]
+fn scheduling_settings_update(
+    db: tauri::State<Db>,
+    input: scheduling::SchedulingSettings,
+) -> Result<scheduling::SchedulingSettings, String> {
+    with_db(&db, |c| scheduling::update(c, input))
+}
+
+#[tauri::command]
+fn closure_list(db: tauri::State<Db>) -> Result<Vec<scheduling::ClosureDate>, String> {
+    with_db(&db, scheduling::closures)
+}
+
+#[tauri::command]
+fn closure_create(db: tauri::State<Db>, input: scheduling::ClosureInput) -> Result<(), String> {
+    with_db(&db, |c| scheduling::add_closure(c, input))
+}
+
+#[tauri::command]
+fn closure_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+    with_db(&db, |c| scheduling::delete_closure(c, id))
+}
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .setup(|app| {
+            let path = app.path().app_data_dir()?.join("clinicdesk.sqlite3");
+            let db = init_db(&path).map_err(std::io::Error::other)?;
+            app.manage(Db(Mutex::new(db)));
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            health,
+            patient_list,
+            patient_count,
+            patient_by_file_no,
+            patient_inactive,
+            patient_create,
+            patient_update,
+            patient_delete,
+            patient_future_appointment_count,
+            clinic_list,
+            clinic_create,
+            clinic_update,
+            clinic_delete,
+            doctor_list,
+            doctor_create,
+            doctor_update,
+            doctor_delete,
+            appointment_list,
+            appointment_missed_history,
+            appointment_upcoming_all,
+            patient_appointments,
+            appointment_create,
+            appointment_update,
+            appointment_status,
+            visit_tracking_command::visit_tracking_get,
+            visit_tracking_update,
+            visit_follow_ups,
+            attachment_list,
+            attachment_import,
+            attachment_remove,
+            scheduling_settings_get,
+            scheduling_settings_update,
+            closure_list,
+            closure_create,
+            closure_delete
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running ClinicDesk");
+}
+
+#[cfg(test)]
+mod migration_tests {
+    use super::*;
+
+    #[test]
+    fn migrations_reach_latest_version_and_are_idempotent() {
+        let db = Connection::open_in_memory().unwrap();
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn migration_rejects_future_schema_version() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        db.execute(
+            "UPDATE app_meta SET value='99' WHERE key='schema_version'",
+            [],
+        )
+        .unwrap();
+        let err = migrate_db(&db).unwrap_err();
+        assert!(err.contains("أحدث"));
+    }
+
+    #[test]
+    fn migration_from_v1_preserves_patient_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        db.execute(
+            "INSERT INTO patients(file_no, full_name, national_id, phone) VALUES(1, 'مريض محفوظ', '1234567890', '0500000000')",
+            [],
+        )
+        .unwrap();
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let row: (i64, String, String) = db
+            .query_row(
+                "SELECT file_no, full_name, national_id FROM patients WHERE file_no=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, 1);
+        assert_eq!(row.1, "مريض محفوظ");
+        assert_eq!(row.2, "1234567890");
+    }
+
+    #[test]
+    fn migration_from_v2_preserves_patient_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("../migrations/002_touch_triggers.sql"))
+            .unwrap();
+        db.execute(
+            "INSERT INTO patients(file_no, full_name, national_id, phone) VALUES(2, 'مريض إصدار 2', '2234567890', '0510000000')",
+            [],
+        )
+        .unwrap();
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let row: (i64, String) = db
+            .query_row(
+                "SELECT file_no, full_name FROM patients WHERE file_no=2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (2, "مريض إصدار 2".to_string()));
+    }
+
+    #[test]
+    fn migration_from_v3_preserves_directory_and_appointment_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("../migrations/002_touch_triggers.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("../migrations/003_scheduling_rules.sql"))
+            .unwrap();
+        db.execute(
+            "INSERT INTO patients(file_no, full_name) VALUES(3, 'مريض موعد')",
+            [],
+        )
+        .unwrap();
+        let patient_id = db.last_insert_rowid();
+        db.execute("INSERT INTO clinics(name) VALUES('عيادة محفوظة')", [])
+            .unwrap();
+        let clinic_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO doctors(clinic_id, name) VALUES(?1, 'طبيب محفوظ')",
+            [clinic_id],
+        )
+        .unwrap();
+        let doctor_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO appointments(patient_id, clinic_id, doctor_id, starts_at, status) VALUES(?1, ?2, ?3, '2026-09-17T09:00:00', 'scheduled')",
+            rusqlite::params![patient_id, clinic_id, doctor_id],
+        )
+        .unwrap();
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let names: (String, String, String) = db
+            .query_row(
+                "SELECT p.full_name, c.name, d.name FROM appointments a JOIN patients p ON p.id=a.patient_id JOIN clinics c ON c.id=a.clinic_id JOIN doctors d ON d.id=a.doctor_id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(names.0, "مريض موعد");
+        assert_eq!(names.1, "عيادة محفوظة");
+        assert_eq!(names.2, "طبيب محفوظ");
+    }
+
+    #[test]
+    fn migration_from_v8_removes_optional_auth_without_touching_clinical_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        for sql in [
+            include_str!("../migrations/002_touch_triggers.sql"),
+            include_str!("../migrations/003_scheduling_rules.sql"),
+            include_str!("../migrations/004_patient_medical_details.sql"),
+            include_str!("../migrations/005_patient_last_activity.sql"),
+            include_str!("../migrations/006_patient_activity_triggers.sql"),
+            include_str!("../migrations/007_appointment_visit_tracking.sql"),
+            include_str!("../migrations/008_optional_auth.sql"),
+        ] {
+            db.execute_batch(sql).unwrap();
+        }
+        db.execute(
+            "INSERT INTO patients(file_no, full_name, national_id) VALUES(8, 'مريض محفوظ بعد إزالة الدخول', '8234567890')",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO users(username, display_name, password_hash, is_system_admin) VALUES('legacy-admin', 'Legacy Admin', 'not-a-real-hash', 1)",
+            [],
+        )
+        .unwrap();
+
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let patient_name: String = db
+            .query_row(
+                "SELECT full_name FROM patients WHERE file_no=8",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(patient_name, "مريض محفوظ بعد إزالة الدخول");
+        for table in [
+            "security_settings",
+            "users",
+            "roles",
+            "role_capabilities",
+            "user_roles",
+            "auth_sessions",
+        ] {
+            let exists: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "legacy auth table still exists: {table}");
+        }
+        let auth_architecture: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM app_meta WHERE key='auth_architecture'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(auth_architecture, 0);
+    }
+}
