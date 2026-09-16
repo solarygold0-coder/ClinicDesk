@@ -320,14 +320,16 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
-            "clinicdesk-{name}-{}-{}.sqlite3",
+        let dir = std::env::temp_dir().join(format!(
+            "clinicdesk-{name}-{}-{}",
             std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        ))
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir.join("clinicdesk.sqlite3")
     }
 
     #[test]
@@ -358,7 +360,7 @@ mod tests {
     fn attachment_backup_detects_tampering() {
         let source = temp("attachment-source");
         let backup = temp("attachment-backup");
-        let root = attachment_sidecar(&source);
+        let root = source.parent().unwrap().join("attachments");
         fs::create_dir_all(&root).unwrap();
         let bytes = b"verified attachment";
         let stored_name = "abc.pdf";
@@ -389,8 +391,9 @@ mod tests {
     fn attachment_restore_replaces_live_files() {
         let source = temp("attachment-restore-source");
         let backup = temp("attachment-restore-backup");
-        let source_root = attachment_sidecar(&source);
-        let live_root = attachment_sidecar(&temp("attachment-live"));
+        let source_root = source.parent().unwrap().join("attachments");
+        let live_db = temp("attachment-live");
+        let live_root = live_db.parent().unwrap().join("attachments");
         fs::create_dir_all(&source_root).unwrap();
         fs::create_dir_all(&live_root).unwrap();
         fs::write(live_root.join("old.pdf"), b"old").unwrap();
@@ -438,7 +441,7 @@ mod tests {
         drop(source_conn);
         create_attachment_backup(
             &Connection::open(&source).unwrap(),
-            &attachment_sidecar(&source),
+            &source.parent().unwrap().join("attachments"),
             &source,
         )
         .ok();
