@@ -69,11 +69,9 @@ fn ten_thousand_patients_survive_verified_backup_restore_with_attachment() {
     tx.commit().unwrap();
 
     let patient_id: i64 = source
-        .query_row(
-            "SELECT id FROM patients WHERE file_no=10000",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT id FROM patients WHERE file_no=10000", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     let attachment_bytes = b"ClinicDesk release regression attachment";
     let stored_name = "release-proof.pdf";
