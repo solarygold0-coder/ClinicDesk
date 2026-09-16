@@ -1,0 +1,72 @@
+html,
+body,
+#root {
+  direction: rtl;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  text-align: right;
+}
+
+input,
+select,
+textarea {
+  direction: rtl;
+}
+
+input[type='number'],
+input[type='tel'],
+input[type='date'],
+input[type='time'],
+input[type='datetime-local'],
+kbd,
+.ltr,
+[dir='ltr'] {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}
+
+.simpleList small {
+  margin-right: 0;
+  margin-inline-start: auto;
+}
+
+.modalActions,
+.headActions,
+.rowActions,
+.inlineAdd,
+.appointmentToolbar,
+.patientPreview,
+.dayCount,
+.cardHead,
+.setup > div {
+  direction: rtl;
+}
+
+.formGrid label,
+.searchbar,
+.tableCard,
+.recordGrid,
+.patientHistory,
+.alertList {
+  direction: rtl;
+}
+
+th,
+td,
+.patientNameLink,
+.alertList button {
+  text-align: right;
+}
+
+@media (max-width: 900px) {
+  .alertsPopover {
+    left: 20px;
+    right: 20px;
+  }
+}
