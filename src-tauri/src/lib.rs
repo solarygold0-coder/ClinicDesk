@@ -57,7 +57,10 @@ fn migrate_db(db: &Connection) -> Result<(), String> {
             include_str!("../migrations/007_appointment_visit_tracking.sql"),
         ),
         (8, include_str!("../migrations/008_optional_auth.sql")),
-        (9, include_str!("../migrations/009_remove_optional_auth.sql")),
+        (
+            9,
+            include_str!("../migrations/009_remove_optional_auth.sql"),
+        ),
     ] {
         if schema_version(db)? < version {
             db.execute_batch(sql).map_err(|e| e.to_string())?;
@@ -91,9 +94,10 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
 
@@ -147,9 +151,10 @@ fn patient_create(
     db: tauri::State<Db>,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     patients::create(&mut g, input)
 }
 
@@ -272,9 +277,10 @@ fn appointment_create(
     db: tauri::State<Db>,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::create(&mut g, input)
 }
 
@@ -284,17 +290,19 @@ fn appointment_update(
     id: i64,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::update(&mut g, id, input)
 }
 
 #[tauri::command]
 fn appointment_status(db: tauri::State<Db>, id: i64, status: String) -> Result<(), String> {
-    let mut g =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointment_status::set_status(&mut g, id, &status)
 }
 
@@ -443,38 +451,7 @@ mod migration_tests {
     }
 
     #[test]
-    fn optional_auth_schema_is_removed() {
-        let db = Connection::open_in_memory().unwrap();
-        migrate_db(&db).unwrap();
-        for table in [
-            "auth_sessions",
-            "user_roles",
-            "role_capabilities",
-            "roles",
-            "users",
-            "security_settings",
-        ] {
-            let count: i64 = db
-                .query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-                    [table],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(count, 0, "legacy auth table still exists: {table}");
-        }
-        let auth_meta: i64 = db
-            .query_row(
-                "SELECT COUNT(*) FROM app_meta WHERE key='auth_architecture'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(auth_meta, 0);
-    }
-
-    #[test]
-    fn newer_database_is_rejected() {
+    fn migration_rejects_future_schema_version() {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(include_str!("../migrations/001_init.sql"))
             .unwrap();
@@ -485,5 +462,160 @@ mod migration_tests {
         .unwrap();
         let err = migrate_db(&db).unwrap_err();
         assert!(err.contains("أحدث"));
+    }
+
+    #[test]
+    fn migration_from_v1_preserves_patient_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        db.execute(
+            "INSERT INTO patients(file_no, full_name, national_id, phone) VALUES(1, 'مريض محفوظ', '1234567890', '0500000000')",
+            [],
+        )
+        .unwrap();
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let row: (i64, String, String) = db
+            .query_row(
+                "SELECT file_no, full_name, national_id FROM patients WHERE file_no=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, 1);
+        assert_eq!(row.1, "مريض محفوظ");
+        assert_eq!(row.2, "1234567890");
+    }
+
+    #[test]
+    fn migration_from_v2_preserves_patient_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("../migrations/002_touch_triggers.sql"))
+            .unwrap();
+        db.execute(
+            "INSERT INTO patients(file_no, full_name, national_id, phone) VALUES(2, 'مريض إصدار 2', '2234567890', '0510000000')",
+            [],
+        )
+        .unwrap();
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let row: (i64, String) = db
+            .query_row(
+                "SELECT file_no, full_name FROM patients WHERE file_no=2",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(row, (2, "مريض إصدار 2".to_string()));
+    }
+
+    #[test]
+    fn migration_from_v3_preserves_directory_and_appointment_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("../migrations/002_touch_triggers.sql"))
+            .unwrap();
+        db.execute_batch(include_str!("../migrations/003_scheduling_rules.sql"))
+            .unwrap();
+        db.execute(
+            "INSERT INTO patients(file_no, full_name) VALUES(3, 'مريض موعد')",
+            [],
+        )
+        .unwrap();
+        let patient_id = db.last_insert_rowid();
+        db.execute("INSERT INTO clinics(name) VALUES('عيادة محفوظة')", [])
+            .unwrap();
+        let clinic_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO doctors(clinic_id, name) VALUES(?1, 'طبيب محفوظ')",
+            [clinic_id],
+        )
+        .unwrap();
+        let doctor_id = db.last_insert_rowid();
+        db.execute(
+            "INSERT INTO appointments(patient_id, clinic_id, doctor_id, starts_at, status) VALUES(?1, ?2, ?3, '2026-09-17T09:00:00', 'scheduled')",
+            rusqlite::params![patient_id, clinic_id, doctor_id],
+        )
+        .unwrap();
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let names: (String, String, String) = db
+            .query_row(
+                "SELECT p.full_name, c.name, d.name FROM appointments a JOIN patients p ON p.id=a.patient_id JOIN clinics c ON c.id=a.clinic_id JOIN doctors d ON d.id=a.doctor_id",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(names.0, "مريض موعد");
+        assert_eq!(names.1, "عيادة محفوظة");
+        assert_eq!(names.2, "طبيب محفوظ");
+    }
+
+    #[test]
+    fn migration_from_v8_removes_optional_auth_without_touching_clinical_data() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        for sql in [
+            include_str!("../migrations/002_touch_triggers.sql"),
+            include_str!("../migrations/003_scheduling_rules.sql"),
+            include_str!("../migrations/004_patient_medical_details.sql"),
+            include_str!("../migrations/005_patient_last_activity.sql"),
+            include_str!("../migrations/006_patient_activity_triggers.sql"),
+            include_str!("../migrations/007_appointment_visit_tracking.sql"),
+            include_str!("../migrations/008_optional_auth.sql"),
+        ] {
+            db.execute_batch(sql).unwrap();
+        }
+        db.execute(
+            "INSERT INTO patients(file_no, full_name, national_id) VALUES(8, 'مريض محفوظ بعد إزالة الدخول', '8234567890')",
+            [],
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO users(username, display_name, password_hash, is_system_admin) VALUES('legacy-admin', 'Legacy Admin', 'not-a-real-hash', 1)",
+            [],
+        )
+        .unwrap();
+
+        migrate_db(&db).unwrap();
+        assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+        let patient_name: String = db
+            .query_row(
+                "SELECT full_name FROM patients WHERE file_no=8",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(patient_name, "مريض محفوظ بعد إزالة الدخول");
+        for table in [
+            "security_settings",
+            "users",
+            "roles",
+            "role_capabilities",
+            "user_roles",
+            "auth_sessions",
+        ] {
+            let exists: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 0, "legacy auth table still exists: {table}");
+        }
+        let auth_architecture: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM app_meta WHERE key='auth_architecture'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(auth_architecture, 0);
     }
 }
