@@ -184,13 +184,19 @@ mod tests {
         let mut current = Connection::open(&live).unwrap();
         super::super::migrate_db(&current).unwrap();
         current
-            .execute("INSERT INTO patients(file_no,full_name) VALUES(1,'قديم')", [])
+            .execute(
+                "INSERT INTO patients(file_no,full_name) VALUES(1,'قديم')",
+                [],
+            )
             .unwrap();
 
         let source_conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&source_conn).unwrap();
         source_conn
-            .execute("INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')", [])
+            .execute(
+                "INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')",
+                [],
+            )
             .unwrap();
         drop(source_conn);
 
@@ -202,11 +208,15 @@ mod tests {
         )
         .unwrap();
         let name: String = current
-            .query_row("SELECT full_name FROM patients WHERE file_no=2", [], |r| r.get(0))
+            .query_row("SELECT full_name FROM patients WHERE file_no=2", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(name, "مستعاد");
         let old_count: i64 = current
-            .query_row("SELECT COUNT(*) FROM patients WHERE file_no=1", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM patients WHERE file_no=1", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(old_count, 0);
         drop(current);
