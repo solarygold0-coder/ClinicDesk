@@ -23,6 +23,17 @@ fn attachment_sidecar(database_path: &Path) -> std::path::PathBuf {
     database_path.with_file_name(format!("{name}.attachments"))
 }
 
+fn live_attachment_root(conn: &Connection) -> Result<std::path::PathBuf, String> {
+    let database_path: String = conn
+        .query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    let database_path = Path::new(&database_path);
+    let parent = database_path
+        .parent()
+        .ok_or_else(|| "مسار قاعدة البيانات غير صالح".to_string())?;
+    Ok(parent.join("attachments"))
+}
+
 fn safe_attachment_name(stored_name: &str) -> Result<(), String> {
     if stored_name.is_empty()
         || Path::new(stored_name).file_name().and_then(|v| v.to_str()) != Some(stored_name)
@@ -200,6 +211,12 @@ pub fn create_database_backup(
         let _ = fs::remove_file(destination);
         return Err(e);
     }
+    let attachment_root = live_attachment_root(conn)?;
+    if let Err(e) = create_attachment_backup(conn, &attachment_root, destination) {
+        let _ = fs::remove_file(destination);
+        let _ = fs::remove_dir_all(attachment_sidecar(destination));
+        return Err(e);
+    }
     sha256_file(destination)
 }
 
@@ -210,10 +227,12 @@ pub fn restore_database(
     expected_schema: i64,
 ) -> Result<String, String> {
     verify_database(source, expected_schema)?;
+    verify_attachment_backup(source)?;
     let source_hash = sha256_file(source)?;
     let parent = live_path
         .parent()
         .ok_or_else(|| "مسار قاعدة البيانات غير صالح".to_string())?;
+    let attachment_root = parent.join("attachments");
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     let staged = parent.join(format!("clinicdesk-restore-{}.sqlite3", Uuid::new_v4()));
     fs::copy(source, &staged).map_err(|e| e.to_string())?;
@@ -236,6 +255,7 @@ pub fn restore_database(
     if let Err(e) = super::migrate_db(&replacement) {
         let _ = fs::remove_file(&staged);
         let _ = fs::remove_file(&rollback);
+        let _ = fs::remove_dir_all(attachment_sidecar(&rollback));
         return Err(e);
     }
     drop(replacement);
@@ -249,6 +269,7 @@ pub fn restore_database(
             *current = Connection::open(live_path).map_err(|open| open.to_string())?;
             let _ = fs::remove_file(&staged);
             let _ = fs::remove_file(&rollback);
+            let _ = fs::remove_dir_all(attachment_sidecar(&rollback));
             return Err(format!("تعذر تجهيز قاعدة البيانات للاستعادة: {e}"));
         }
     }
@@ -258,6 +279,7 @@ pub fn restore_database(
         *current = Connection::open(live_path).map_err(|open| open.to_string())?;
         let _ = fs::remove_file(&staged);
         let _ = fs::remove_file(&rollback);
+        let _ = fs::remove_dir_all(attachment_sidecar(&rollback));
         return Err(format!("تعذرت استعادة النسخة: {e}"));
     }
     let reopened = Connection::open(live_path).map_err(|e| e.to_string())?;
@@ -268,10 +290,27 @@ pub fn restore_database(
             .map_err(|r| format!("فشل التحقق بعد الاستعادة ({e}) وتعذر التراجع عنها ({r})"))?;
         *current = Connection::open(live_path).map_err(|open| open.to_string())?;
         let _ = fs::remove_file(&rollback);
+        let _ = fs::remove_dir_all(attachment_sidecar(&rollback));
         return Err(e);
     }
     *current = reopened;
+
+    if let Err(e) = restore_attachment_backup(source, &attachment_root) {
+        let placeholder = Connection::open_in_memory().map_err(|open| open.to_string())?;
+        let restored = std::mem::replace(current, placeholder);
+        drop(restored);
+        let _ = fs::remove_file(live_path);
+        fs::copy(&rollback, live_path)
+            .map_err(|r| format!("فشلت استعادة المرفقات ({e}) وتعذر التراجع عن قاعدة البيانات ({r})"))?;
+        *current = Connection::open(live_path).map_err(|open| open.to_string())?;
+        let _ = restore_attachment_backup(&rollback, &attachment_root);
+        let _ = fs::remove_file(&rollback);
+        let _ = fs::remove_dir_all(attachment_sidecar(&rollback));
+        return Err(e);
+    }
+
     let _ = fs::remove_file(&rollback);
+    let _ = fs::remove_dir_all(attachment_sidecar(&rollback));
     Ok(source_hash)
 }
 
@@ -297,15 +336,12 @@ mod tests {
         let backup = temp("backup");
         let conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&conn).unwrap();
-        conn.execute(
-            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
-            [],
-        )
-        .unwrap();
-        let hash =
-            create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
+        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
+            .unwrap();
+        let hash = create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
         assert_eq!(hash.len(), 64);
         verify_database(&backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
+        verify_attachment_backup(&backup).unwrap();
         let copied = Connection::open(&backup).unwrap();
         let count: i64 = copied
             .query_row("SELECT COUNT(*) FROM patients", [], |r| r.get(0))
@@ -314,7 +350,8 @@ mod tests {
         drop(copied);
         drop(conn);
         let _ = fs::remove_file(source);
-        let _ = fs::remove_file(backup);
+        let _ = fs::remove_file(&backup);
+        let _ = fs::remove_dir_all(attachment_sidecar(&backup));
     }
 
     #[test]
@@ -328,11 +365,8 @@ mod tests {
         fs::write(root.join(stored_name), bytes).unwrap();
         let conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&conn).unwrap();
-        conn.execute(
-            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
-            [],
-        )
-        .unwrap();
+        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
+            .unwrap();
         let patient_id = conn.last_insert_rowid();
         let hash = format!("{:x}", Sha256::digest(bytes));
         conn.execute(
@@ -341,7 +375,6 @@ mod tests {
         )
         .unwrap();
         create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
-        create_attachment_backup(&conn, &root, &backup).unwrap();
         verify_attachment_backup(&backup).unwrap();
         fs::write(attachment_sidecar(&backup).join(stored_name), b"tampered").unwrap();
         assert!(verify_attachment_backup(&backup).is_err());
@@ -376,7 +409,6 @@ mod tests {
         )
         .unwrap();
         create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
-        create_attachment_backup(&conn, &source_root, &backup).unwrap();
         restore_attachment_backup(&backup, &live_root).unwrap();
         assert_eq!(fs::read(live_root.join(stored_name)).unwrap(), bytes);
         assert!(!live_root.join("old.pdf").exists());
@@ -404,6 +436,13 @@ mod tests {
             .execute("INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')", [])
             .unwrap();
         drop(source_conn);
+        create_attachment_backup(
+            &Connection::open(&source).unwrap(),
+            &attachment_sidecar(&source),
+            &source,
+        )
+        .ok();
+        fs::create_dir_all(attachment_sidecar(&source)).unwrap();
 
         restore_database(
             &mut current,
