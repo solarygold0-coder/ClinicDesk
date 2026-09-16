@@ -1,7 +1,12 @@
 use clinicdesk_lib::backup;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
-use std::{fs, path::Path, path::PathBuf, time::{SystemTime, UNIX_EPOCH}};
+use std::{
+    fs,
+    path::Path,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 fn temp_dir(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -64,7 +69,11 @@ fn ten_thousand_patients_survive_verified_backup_restore_with_attachment() {
     tx.commit().unwrap();
 
     let patient_id: i64 = source
-        .query_row("SELECT id FROM patients WHERE file_no=10000", [], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM patients WHERE file_no=10000",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     let attachment_bytes = b"ClinicDesk release regression attachment";
     let stored_name = "release-proof.pdf";
@@ -85,17 +94,28 @@ fn ten_thousand_patients_survive_verified_backup_restore_with_attachment() {
 
     let mut live = Connection::open(&live_db).unwrap();
     migrate(&live);
-    live.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'سيتم استبداله')", [])
-        .unwrap();
+    live.execute(
+        "INSERT INTO patients(file_no,full_name) VALUES(1,'سيتم استبداله')",
+        [],
+    )
+    .unwrap();
 
     let restored_hash = backup::restore_database(&mut live, &backup_db, &live_db, 9).unwrap();
     assert_eq!(restored_hash, backup_hash);
     let patient_count: i64 = live
-        .query_row("SELECT COUNT(*) FROM patients WHERE deleted_at IS NULL", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM patients WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(patient_count, 10_000);
     let last_name: String = live
-        .query_row("SELECT full_name FROM patients WHERE file_no=10000", [], |r| r.get(0))
+        .query_row(
+            "SELECT full_name FROM patients WHERE file_no=10000",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(last_name, "مريض 10000");
     assert_eq!(
