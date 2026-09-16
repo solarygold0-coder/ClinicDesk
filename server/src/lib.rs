@@ -1,3 +1,5 @@
+pub mod db;
+
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
 
