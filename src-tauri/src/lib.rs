@@ -19,7 +19,7 @@ use std::{
 use tauri::Manager;
 
 pub struct Db(pub Mutex<Connection>);
-const LATEST_SCHEMA_VERSION: i64 = 10;
+const LATEST_SCHEMA_VERSION: i64 = 11;
 
 fn schema_version(db: &Connection) -> Result<i64, String> {
     db.query_row(
@@ -66,6 +66,10 @@ fn migrate_db(db: &Connection) -> Result<(), String> {
         (
             10,
             include_str!("../migrations/010_restore_users_roles_audit_actor.sql"),
+        ),
+        (
+            11,
+            include_str!("../migrations/011_accountability_identity.sql"),
         ),
     ] {
         if schema_version(db)? < version {
@@ -499,6 +503,14 @@ mod migration_tests {
         .unwrap()
     }
 
+    fn column_exists(db: &Connection, table: &str, name: &str) -> i64 {
+        let sql = format!(
+            "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name=?1",
+            table.replace('\'', "''")
+        );
+        db.query_row(&sql, [name], |r| r.get(0)).unwrap()
+    }
+
     #[test]
     fn migrations_reach_latest_version_and_are_idempotent() {
         let db = Connection::open_in_memory().unwrap();
@@ -508,6 +520,12 @@ mod migration_tests {
         assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
         assert_eq!(table_exists(&db, "users"), 1);
         assert_eq!(table_exists(&db, "roles"), 1);
+        assert_eq!(column_exists(&db, "users", "employee_code"), 1);
+        assert_eq!(column_exists(&db, "audit_log", "actor_employee_code"), 1);
+        assert_eq!(column_exists(&db, "audit_log", "actor_session_id"), 1);
+        assert_eq!(column_exists(&db, "audit_log", "before_json"), 1);
+        assert_eq!(column_exists(&db, "audit_log", "after_json"), 1);
+        assert_eq!(column_exists(&db, "audit_log", "reason"), 1);
     }
 
     #[test]
@@ -550,13 +568,15 @@ mod migration_tests {
 
         migrate_db(&db).unwrap();
 
-        assert_eq!(schema_version(&db).unwrap(), 10);
+        assert_eq!(schema_version(&db).unwrap(), 11);
         assert_eq!(table_exists(&db, "users"), 1);
         assert_eq!(table_exists(&db, "roles"), 1);
         let name: String = db
-            .query_row("SELECT full_name FROM patients WHERE file_no=9", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT full_name FROM patients WHERE file_no=9",
+                [],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(name, "مريض محفوظ من إصدار 9");
         let actor_cols: i64 = db
@@ -567,5 +587,7 @@ mod migration_tests {
             )
             .unwrap();
         assert_eq!(actor_cols, 2);
+        assert_eq!(column_exists(&db, "users", "employee_code"), 1);
+        assert_eq!(column_exists(&db, "audit_log", "actor_employee_code"), 1);
     }
 }
