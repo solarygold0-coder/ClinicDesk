@@ -50,7 +50,8 @@ pub fn recent(conn: &Connection, limit: i64) -> Result<Vec<AuditEntry>, String> 
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -64,7 +65,14 @@ mod tests {
             "CREATE TABLE audit_log(id INTEGER PRIMARY KEY,event_type TEXT NOT NULL,entity_type TEXT NOT NULL,entity_id INTEGER,details_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
         )
         .unwrap();
-        record(&db, "backup_created", "database", None, Some("{\"sha256\":\"abc\"}")).unwrap();
+        record(
+            &db,
+            "backup_created",
+            "database",
+            None,
+            Some("{\"sha256\":\"abc\"}"),
+        )
+        .unwrap();
         let events = recent(&db, 10).unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "backup_created");
