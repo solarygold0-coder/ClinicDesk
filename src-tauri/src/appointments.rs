@@ -182,7 +182,9 @@ fn ensure_no_conflict(
     ends: &str,
     exclude_id: Option<i64>,
 ) -> Result<(), String> {
-    let sql=format!("SELECT id FROM appointments WHERE status IN {ACTIVE} AND starts_at<?1 AND ends_at>?2 AND ((?3 IS NOT NULL AND doctor_id=?3) OR (?4 IS NOT NULL AND clinic_id=?4)) AND (?5 IS NULL OR id<>?5) LIMIT 1");
+    let sql = format!(
+        "SELECT id FROM appointments WHERE status IN {ACTIVE} AND starts_at<?1 AND ends_at>?2 AND ((?3 IS NOT NULL AND doctor_id=?3) OR (?3 IS NULL AND ?4 IS NOT NULL AND doctor_id IS NULL AND clinic_id=?4)) AND (?5 IS NULL OR id<>?5) LIMIT 1"
+    );
     let conflict: Option<i64> = tx
         .query_row(
             &sql,
@@ -338,6 +340,26 @@ mod tests {
         let mut c = db();
         create(&mut c, i("2026-09-20T10:00")).unwrap();
         assert!(create(&mut c, i("2026-09-20T10:30")).is_ok())
+    }
+    #[test]
+    fn different_doctors_in_same_clinic_can_overlap() {
+        let mut c = db();
+        c.execute("INSERT INTO doctors(clinic_id,name)VALUES(1,'طبيب ثان')", [])
+            .unwrap();
+        create(&mut c, i("2026-09-20T10:00")).unwrap();
+        let mut other = i("2026-09-20T10:15");
+        other.doctor_id = Some(2);
+        assert!(create(&mut c, other).is_ok())
+    }
+    #[test]
+    fn clinic_only_appointments_still_conflict_with_each_other() {
+        let mut c = db();
+        let mut first = i("2026-09-20T10:00");
+        first.doctor_id = None;
+        create(&mut c, first).unwrap();
+        let mut second = i("2026-09-20T10:15");
+        second.doctor_id = None;
+        assert!(create(&mut c, second).is_err())
     }
     #[test]
     fn outside_hours_is_blocked() {
