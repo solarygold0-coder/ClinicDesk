@@ -100,20 +100,34 @@ pub fn restore_database(
     let placeholder = Connection::open_in_memory().map_err(|e| e.to_string())?;
     let old = std::mem::replace(current, placeholder);
     drop(old);
+
+    // Windows does not reliably allow renaming over an existing SQLite file.
+    // The verified rollback snapshot is already durable, so remove the closed
+    // live file before promoting the verified staged database.
+    if let Err(e) = fs::remove_file(live_path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            *current = Connection::open(live_path).map_err(|open| open.to_string())?;
+            let _ = fs::remove_file(&staged);
+            let _ = fs::remove_file(&rollback);
+            return Err(format!("تعذر تجهيز قاعدة البيانات للاستعادة: {e}"));
+        }
+    }
     if let Err(e) = fs::rename(&staged, live_path) {
-        let _ = fs::remove_file(live_path);
-        fs::rename(&rollback, live_path)
+        fs::copy(&rollback, live_path)
             .map_err(|r| format!("تعذرت الاستعادة ({e}) وتعذر التراجع عنها ({r})"))?;
         *current = Connection::open(live_path).map_err(|open| open.to_string())?;
+        let _ = fs::remove_file(&staged);
+        let _ = fs::remove_file(&rollback);
         return Err(format!("تعذرت استعادة النسخة: {e}"));
     }
     let reopened = Connection::open(live_path).map_err(|e| e.to_string())?;
     if let Err(e) = super::migrate_db(&reopened) {
         drop(reopened);
         let _ = fs::remove_file(live_path);
-        fs::rename(&rollback, live_path)
+        fs::copy(&rollback, live_path)
             .map_err(|r| format!("فشل التحقق بعد الاستعادة ({e}) وتعذر التراجع عنها ({r})"))?;
         *current = Connection::open(live_path).map_err(|open| open.to_string())?;
+        let _ = fs::remove_file(&rollback);
         return Err(e);
     }
     *current = reopened;
@@ -161,6 +175,43 @@ mod tests {
         drop(conn);
         let _ = fs::remove_file(source);
         let _ = fs::remove_file(backup);
+    }
+
+    #[test]
+    fn restore_replaces_existing_live_database() {
+        let live = temp("live");
+        let source = temp("restore-source");
+        let mut current = Connection::open(&live).unwrap();
+        super::super::migrate_db(&current).unwrap();
+        current
+            .execute("INSERT INTO patients(file_no,full_name) VALUES(1,'قديم')", [])
+            .unwrap();
+
+        let source_conn = Connection::open(&source).unwrap();
+        super::super::migrate_db(&source_conn).unwrap();
+        source_conn
+            .execute("INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')", [])
+            .unwrap();
+        drop(source_conn);
+
+        restore_database(
+            &mut current,
+            &source,
+            &live,
+            super::super::LATEST_SCHEMA_VERSION,
+        )
+        .unwrap();
+        let name: String = current
+            .query_row("SELECT full_name FROM patients WHERE file_no=2", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(name, "مستعاد");
+        let old_count: i64 = current
+            .query_row("SELECT COUNT(*) FROM patients WHERE file_no=1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(old_count, 0);
+        drop(current);
+        let _ = fs::remove_file(live);
+        let _ = fs::remove_file(source);
     }
 
     #[test]
