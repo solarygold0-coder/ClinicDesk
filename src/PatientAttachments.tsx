@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FilePlus2, Paperclip, Trash2 } from 'lucide-react';
+import { openPath } from '@tauri-apps/plugin-opener';
+import { appDataDir, join } from '@tauri-apps/api/path';
+import { ExternalLink, FilePlus2, Paperclip, Trash2 } from 'lucide-react';
 import { api, Attachment } from './api';
 
 function sizeLabel(bytes: number) {
@@ -46,6 +48,17 @@ export function PatientAttachments({ patientId }: { patientId: number }) {
     }
   }
 
+  async function openAttachment(item: Attachment) {
+    setError('');
+    try {
+      const root = await appDataDir();
+      const path = await join(root, 'attachments', item.storedName);
+      await openPath(path);
+    } catch (e) {
+      setError(`تعذر فتح المرفق: ${String(e)}`);
+    }
+  }
+
   async function remove(item: Attachment) {
     if (!confirm(`حذف المرفق ${item.originalName}؟`)) return;
     setBusy(true);
@@ -74,10 +87,13 @@ export function PatientAttachments({ patientId }: { patientId: number }) {
           {items.map(item => (
             <article key={item.id} className="attachmentItem">
               <Paperclip />
-              <span>
-                <strong>{item.originalName}</strong>
-                <small>{sizeLabel(item.sizeBytes)} • {new Date(item.createdAt).toLocaleString('ar-SA')}</small>
-              </span>
+              <button type="button" className="attachmentOpen" disabled={busy} onClick={() => void openAttachment(item)} title={`فتح ${item.originalName}`}>
+                <span>
+                  <strong>{item.originalName}</strong>
+                  <small>{sizeLabel(item.sizeBytes)} • {new Date(item.createdAt).toLocaleString('ar-SA')}</small>
+                </span>
+                <ExternalLink aria-hidden="true" />
+              </button>
               <button type="button" className="dangerIcon" disabled={busy} aria-label={`حذف ${item.originalName}`} onClick={() => void remove(item)}>
                 <Trash2 />
               </button>
