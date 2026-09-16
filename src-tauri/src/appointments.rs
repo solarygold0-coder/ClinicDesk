@@ -344,8 +344,11 @@ mod tests {
     #[test]
     fn different_doctors_in_same_clinic_can_overlap() {
         let mut c = db();
-        c.execute("INSERT INTO doctors(clinic_id,name)VALUES(1,'طبيب ثان')", [])
-            .unwrap();
+        c.execute(
+            "INSERT INTO doctors(clinic_id,name)VALUES(1,'طبيب ثان')",
+            [],
+        )
+        .unwrap();
         create(&mut c, i("2026-09-20T10:00")).unwrap();
         let mut other = i("2026-09-20T10:15");
         other.doctor_id = Some(2);
