@@ -84,7 +84,10 @@ pub fn restore_database(
         return Err("فشل التحقق من تطابق النسخة أثناء الاستعادة".into());
     }
 
-    let rollback = parent.join(format!("clinicdesk-before-restore-{}.sqlite3", Uuid::new_v4()));
+    let rollback = parent.join(format!(
+        "clinicdesk-before-restore-{}.sqlite3",
+        Uuid::new_v4()
+    ));
     create_database_backup(current, &rollback, expected_schema)?;
     let replacement = Connection::open(&staged).map_err(|e| e.to_string())?;
     if let Err(e) = super::migrate_db(&replacement) {
@@ -108,9 +111,8 @@ pub fn restore_database(
     if let Err(e) = super::migrate_db(&reopened) {
         drop(reopened);
         let _ = fs::remove_file(live_path);
-        fs::rename(&rollback, live_path).map_err(|r| {
-            format!("فشل التحقق بعد الاستعادة ({e}) وتعذر التراجع عنها ({r})")
-        })?;
+        fs::rename(&rollback, live_path)
+            .map_err(|r| format!("فشل التحقق بعد الاستعادة ({e}) وتعذر التراجع عنها ({r})"))?;
         *current = Connection::open(live_path).map_err(|open| open.to_string())?;
         return Err(e);
     }
@@ -141,13 +143,19 @@ mod tests {
         let backup = temp("backup");
         let conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&conn).unwrap();
-        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
-            .unwrap();
-        let hash = create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
+        conn.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+            [],
+        )
+        .unwrap();
+        let hash =
+            create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
         assert_eq!(hash.len(), 64);
         verify_database(&backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
         let copied = Connection::open(&backup).unwrap();
-        let count: i64 = copied.query_row("SELECT COUNT(*) FROM patients", [], |r| r.get(0)).unwrap();
+        let count: i64 = copied
+            .query_row("SELECT COUNT(*) FROM patients", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(count, 1);
         drop(copied);
         drop(conn);
