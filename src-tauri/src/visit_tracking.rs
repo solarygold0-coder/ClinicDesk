@@ -81,7 +81,7 @@ pub fn update(c: &Connection, id: i64, input: VisitTrackingInput) -> Result<(), 
 
 pub fn follow_ups(c: &Connection, from: &str, to: &str) -> Result<Vec<FollowUpVisit>, String> {
     let mut statement = c.prepare(
-        "SELECT a.id,a.patient_id,p.file_no,p.full_name,a.follow_up_at,a.visit_type FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE p.deleted_at IS NULL AND a.follow_up_at IS NOT NULL AND a.follow_up_at>=?1 AND a.follow_up_at<?2 ORDER BY a.follow_up_at",
+        "SELECT a.id,a.patient_id,p.file_no,p.full_name,COALESCE(a.follow_up_at,a.starts_at),a.visit_type FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE p.deleted_at IS NULL AND ((a.follow_up_at IS NOT NULL AND a.follow_up_at>=?1 AND a.follow_up_at<?2) OR (a.visit_type='renewal' AND a.starts_at>=?1 AND a.starts_at<?2)) ORDER BY COALESCE(a.follow_up_at,a.starts_at)",
     ).map_err(|e| e.to_string())?;
     let rows = statement
         .query_map(params![from, to], |row| {
@@ -138,6 +138,24 @@ mod tests {
         let rows = follow_ups(&c, "2026-10-01T00:00:00", "2026-10-02T00:00:00").unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].file_no, 1);
+    }
+    #[test]
+    fn renewal_without_follow_up_date_is_queryable() {
+        let c = db();
+        update(
+            &c,
+            1,
+            VisitTrackingInput {
+                visit_type: "renewal".into(),
+                visit_stage: "scheduled".into(),
+                follow_up_at: None,
+            },
+        )
+        .unwrap();
+        let rows = follow_ups(&c, "2026-09-20T00:00:00", "2026-09-21T00:00:00").unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].visit_type, "renewal");
+        assert_eq!(rows[0].follow_up_at, "2026-09-20T10:00:00");
     }
     #[test]
     fn invalid_visit_type_is_rejected() {
