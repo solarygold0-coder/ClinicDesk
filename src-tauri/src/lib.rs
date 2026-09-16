@@ -572,11 +572,9 @@ mod migration_tests {
         assert_eq!(table_exists(&db, "users"), 1);
         assert_eq!(table_exists(&db, "roles"), 1);
         let name: String = db
-            .query_row(
-                "SELECT full_name FROM patients WHERE file_no=9",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT full_name FROM patients WHERE file_no=9", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(name, "مريض محفوظ من إصدار 9");
         let actor_cols: i64 = db
