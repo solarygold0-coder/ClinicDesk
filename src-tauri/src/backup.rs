@@ -298,7 +298,7 @@ mod tests {
         assert!(verify_attachment_backup(&backup).is_err());
         drop(conn);
         let _ = fs::remove_file(source);
-        let _ = fs::remove_file(backup);
+        let _ = fs::remove_file(&backup);
         let _ = fs::remove_dir_all(root);
         let _ = fs::remove_dir_all(attachment_sidecar(&backup));
     }
