@@ -100,10 +100,9 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
 
@@ -157,10 +156,9 @@ fn patient_create(
     db: tauri::State<Db>,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     patients::create(&mut g, input)
 }
 
@@ -283,10 +281,9 @@ fn appointment_create(
     db: tauri::State<Db>,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::create(&mut g, input)
 }
 
@@ -296,19 +293,17 @@ fn appointment_update(
     id: i64,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::update(&mut g, id, input)
 }
 
 #[tauri::command]
 fn appointment_status(db: tauri::State<Db>, id: i64, status: String) -> Result<(), String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointment_status::set_status(&mut g, id, &status)
 }
 
@@ -394,10 +389,9 @@ fn closure_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
 
 #[tauri::command]
 fn backup_create(db: tauri::State<Db>, destination_path: String) -> Result<String, String> {
-    let g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     let hash =
         backup::create_database_backup(&g, Path::new(&destination_path), LATEST_SCHEMA_VERSION)?;
     let details = serde_json::json!({"sha256":hash}).to_string();
@@ -416,10 +410,9 @@ fn backup_restore(
         .app_data_dir()
         .map_err(|e| e.to_string())?
         .join("clinicdesk.sqlite3");
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     let hash = backup::restore_database(
         &mut g,
         Path::new(&source_path),
@@ -561,11 +554,9 @@ mod migration_tests {
         assert_eq!(table_exists(&db, "users"), 1);
         assert_eq!(table_exists(&db, "roles"), 1);
         let name: String = db
-            .query_row(
-                "SELECT full_name FROM patients WHERE file_no=9",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT full_name FROM patients WHERE file_no=9", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(name, "مريض محفوظ من إصدار 9");
         let actor_cols: i64 = db
