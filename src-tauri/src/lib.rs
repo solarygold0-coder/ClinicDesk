@@ -94,10 +94,9 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
 
@@ -151,10 +150,9 @@ fn patient_create(
     db: tauri::State<Db>,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     patients::create(&mut g, input)
 }
 
@@ -277,10 +275,9 @@ fn appointment_create(
     db: tauri::State<Db>,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::create(&mut g, input)
 }
 
@@ -290,19 +287,17 @@ fn appointment_update(
     id: i64,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::update(&mut g, id, input)
 }
 
 #[tauri::command]
 fn appointment_status(db: tauri::State<Db>, id: i64, status: String) -> Result<(), String> {
-    let mut g = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut g =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointment_status::set_status(&mut g, id, &status)
 }
 
@@ -537,7 +532,7 @@ mod migration_tests {
         .unwrap();
         let doctor_id = db.last_insert_rowid();
         db.execute(
-            "INSERT INTO appointments(patient_id, clinic_id, doctor_id, starts_at, status) VALUES(?1, ?2, ?3, '2026-09-17T09:00:00', 'scheduled')",
+            "INSERT INTO appointments(patient_id, clinic_id, doctor_id, starts_at, ends_at, status) VALUES(?1, ?2, ?3, '2026-09-17T09:00:00', '2026-09-17T09:30:00', 'scheduled')",
             rusqlite::params![patient_id, clinic_id, doctor_id],
         )
         .unwrap();
@@ -585,11 +580,9 @@ mod migration_tests {
         migrate_db(&db).unwrap();
         assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
         let patient_name: String = db
-            .query_row(
-                "SELECT full_name FROM patients WHERE file_no=8",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT full_name FROM patients WHERE file_no=8", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(patient_name, "مريض محفوظ بعد إزالة الدخول");
         for table in [
