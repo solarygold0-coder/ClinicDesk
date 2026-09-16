@@ -5,7 +5,6 @@ pub mod directory;
 pub mod domain;
 pub mod patients;
 pub mod scheduling;
-pub mod security;
 pub mod visit_tracking;
 pub mod visit_tracking_command;
 
@@ -18,7 +17,7 @@ use std::{
 use tauri::Manager;
 
 pub struct Db(pub Mutex<Connection>);
-const LATEST_SCHEMA_VERSION: i64 = 8;
+const LATEST_SCHEMA_VERSION: i64 = 9;
 
 fn schema_version(db: &Connection) -> Result<i64, String> {
     db.query_row(
@@ -58,6 +57,7 @@ fn migrate_db(db: &Connection) -> Result<(), String> {
             include_str!("../migrations/007_appointment_visit_tracking.sql"),
         ),
         (8, include_str!("../migrations/008_optional_auth.sql")),
+        (9, include_str!("../migrations/009_remove_optional_auth.sql")),
     ] {
         if schema_version(db)? < version {
             db.execute_batch(sql).map_err(|e| e.to_string())?;
@@ -100,11 +100,6 @@ fn with_db<T>(
 #[tauri::command]
 fn health() -> &'static str {
     "ok"
-}
-
-#[tauri::command]
-fn security_state(db: tauri::State<Db>) -> Result<security::SecurityState, String> {
-    with_db(&db, security::state)
 }
 
 #[tauri::command]
@@ -395,7 +390,6 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             health,
-            security_state,
             patient_list,
             patient_count,
             patient_by_file_no,
@@ -446,6 +440,37 @@ mod migration_tests {
         assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
         migrate_db(&db).unwrap();
         assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn optional_auth_schema_is_removed() {
+        let db = Connection::open_in_memory().unwrap();
+        migrate_db(&db).unwrap();
+        for table in [
+            "auth_sessions",
+            "user_roles",
+            "role_capabilities",
+            "roles",
+            "users",
+            "security_settings",
+        ] {
+            let count: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(count, 0, "legacy auth table still exists: {table}");
+        }
+        let auth_meta: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM app_meta WHERE key='auth_architecture'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(auth_meta, 0);
     }
 
     #[test]
