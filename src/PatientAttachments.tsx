@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openPath } from '@tauri-apps/plugin-opener';
-import { appDataDir, join } from '@tauri-apps/api/path';
 import { ExternalLink, FilePlus2, Paperclip, Trash2 } from 'lucide-react';
 import { api, Attachment } from './api';
 
@@ -51,9 +49,7 @@ export function PatientAttachments({ patientId }: { patientId: number }) {
   async function openAttachment(item: Attachment) {
     setError('');
     try {
-      const root = await appDataDir();
-      const path = await join(root, 'attachments', item.storedName);
-      await openPath(path);
+      await api.openAttachment(item.id);
     } catch (e) {
       setError(`تعذر فتح المرفق: ${String(e)}`);
     }
