@@ -25,7 +25,11 @@ fn attachment_sidecar(database_path: &Path) -> std::path::PathBuf {
 
 fn live_attachment_root(conn: &Connection) -> Result<std::path::PathBuf, String> {
     let database_path: String = conn
-        .query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |r| r.get(0))
+        .query_row(
+            "SELECT file FROM pragma_database_list WHERE name='main'",
+            [],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
     let database_path = Path::new(&database_path);
     let parent = database_path
@@ -144,7 +148,10 @@ pub fn create_attachment_backup(
     result
 }
 
-pub fn restore_attachment_backup(database_path: &Path, attachment_root: &Path) -> Result<(), String> {
+pub fn restore_attachment_backup(
+    database_path: &Path,
+    attachment_root: &Path,
+) -> Result<(), String> {
     verify_attachment_backup(database_path)?;
     let source = attachment_sidecar(database_path);
     let parent = attachment_root
@@ -300,8 +307,9 @@ pub fn restore_database(
         let restored = std::mem::replace(current, placeholder);
         drop(restored);
         let _ = fs::remove_file(live_path);
-        fs::copy(&rollback, live_path)
-            .map_err(|r| format!("فشلت استعادة المرفقات ({e}) وتعذر التراجع عن قاعدة البيانات ({r})"))?;
+        fs::copy(&rollback, live_path).map_err(|r| {
+            format!("فشلت استعادة المرفقات ({e}) وتعذر التراجع عن قاعدة البيانات ({r})")
+        })?;
         *current = Connection::open(live_path).map_err(|open| open.to_string())?;
         let _ = restore_attachment_backup(&rollback, &attachment_root);
         let _ = fs::remove_file(&rollback);
@@ -338,9 +346,13 @@ mod tests {
         let backup = temp("backup");
         let conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&conn).unwrap();
-        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
-            .unwrap();
-        let hash = create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
+        conn.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+            [],
+        )
+        .unwrap();
+        let hash =
+            create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
         assert_eq!(hash.len(), 64);
         verify_database(&backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
         verify_attachment_backup(&backup).unwrap();
@@ -367,8 +379,11 @@ mod tests {
         fs::write(root.join(stored_name), bytes).unwrap();
         let conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&conn).unwrap();
-        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+            [],
+        )
+        .unwrap();
         let patient_id = conn.last_insert_rowid();
         let hash = format!("{:x}", Sha256::digest(bytes));
         conn.execute(
@@ -402,8 +417,11 @@ mod tests {
         fs::write(source_root.join(stored_name), bytes).unwrap();
         let conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&conn).unwrap();
-        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+            [],
+        )
+        .unwrap();
         let patient_id = conn.last_insert_rowid();
         let hash = format!("{:x}", Sha256::digest(bytes));
         conn.execute(
@@ -430,13 +448,19 @@ mod tests {
         let mut current = Connection::open(&live).unwrap();
         super::super::migrate_db(&current).unwrap();
         current
-            .execute("INSERT INTO patients(file_no,full_name) VALUES(1,'قديم')", [])
+            .execute(
+                "INSERT INTO patients(file_no,full_name) VALUES(1,'قديم')",
+                [],
+            )
             .unwrap();
 
         let source_conn = Connection::open(&source).unwrap();
         super::super::migrate_db(&source_conn).unwrap();
         source_conn
-            .execute("INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')", [])
+            .execute(
+                "INSERT INTO patients(file_no,full_name) VALUES(2,'مستعاد')",
+                [],
+            )
             .unwrap();
         drop(source_conn);
         create_attachment_backup(
@@ -455,11 +479,15 @@ mod tests {
         )
         .unwrap();
         let name: String = current
-            .query_row("SELECT full_name FROM patients WHERE file_no=2", [], |r| r.get(0))
+            .query_row("SELECT full_name FROM patients WHERE file_no=2", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(name, "مستعاد");
         let old_count: i64 = current
-            .query_row("SELECT COUNT(*) FROM patients WHERE file_no=1", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM patients WHERE file_no=1", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(old_count, 0);
         drop(current);
