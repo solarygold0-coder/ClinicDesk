@@ -19,7 +19,7 @@ use std::{
 use tauri::Manager;
 
 pub struct Db(pub Mutex<Connection>);
-const LATEST_SCHEMA_VERSION: i64 = 11;
+const LATEST_SCHEMA_VERSION: i64 = 12;
 
 fn schema_version(db: &Connection) -> Result<i64, String> {
     db.query_row(
@@ -70,6 +70,10 @@ fn migrate_db(db: &Connection) -> Result<(), String> {
         (
             11,
             include_str!("../migrations/011_accountability_identity.sql"),
+        ),
+        (
+            12,
+            include_str!("../migrations/012_immutable_employee_identity.sql"),
         ),
     ] {
         if schema_version(db)? < version {
@@ -526,6 +530,14 @@ mod migration_tests {
         assert_eq!(column_exists(&db, "audit_log", "before_json"), 1);
         assert_eq!(column_exists(&db, "audit_log", "after_json"), 1);
         assert_eq!(column_exists(&db, "audit_log", "reason"), 1);
+        let policy: String = db
+            .query_row(
+                "SELECT value FROM app_meta WHERE key='employee_identity_policy'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(policy, "immutable-preserved-v1");
     }
 
     #[test]
@@ -568,7 +580,7 @@ mod migration_tests {
 
         migrate_db(&db).unwrap();
 
-        assert_eq!(schema_version(&db).unwrap(), 11);
+        assert_eq!(schema_version(&db).unwrap(), 12);
         assert_eq!(table_exists(&db, "users"), 1);
         assert_eq!(table_exists(&db, "roles"), 1);
         let name: String = db
@@ -587,5 +599,30 @@ mod migration_tests {
         assert_eq!(actor_cols, 2);
         assert_eq!(column_exists(&db, "users", "employee_code"), 1);
         assert_eq!(column_exists(&db, "audit_log", "actor_employee_code"), 1);
+    }
+
+    #[test]
+    fn employee_code_is_required_immutable_and_identity_is_preserved() {
+        let db = Connection::open_in_memory().unwrap();
+        migrate_db(&db).unwrap();
+        assert!(db
+            .execute(
+                "INSERT INTO users(username,display_name,password_hash) VALUES('missing','بدون رمز','x')",
+                [],
+            )
+            .is_err());
+        db.execute(
+            "INSERT INTO users(username,display_name,password_hash,employee_code) VALUES('u1','موظف','x','U000001')",
+            [],
+        )
+        .unwrap();
+        assert!(db
+            .execute("UPDATE users SET employee_code='U999999' WHERE username='u1'", [])
+            .is_err());
+        assert!(db.execute("DELETE FROM users WHERE username='u1'", []).is_err());
+        let code: String = db
+            .query_row("SELECT employee_code FROM users WHERE username='u1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(code, "U000001");
     }
 }
