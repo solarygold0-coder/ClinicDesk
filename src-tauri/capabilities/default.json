@@ -1,1 +1,1 @@
-{"identifier":"main-capability","description":"ClinicDesk desktop window","windows":["main"],"permissions":["core:default","dialog:allow-open"]}
+{"identifier":"main-capability","description":"ClinicDesk desktop window","windows":["main"],"permissions":["core:default","dialog:allow-open","dialog:allow-save"]}
