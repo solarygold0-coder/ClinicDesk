@@ -15,6 +15,23 @@ pub fn sha256_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
+fn attachment_sidecar(database_path: &Path) -> std::path::PathBuf {
+    let name = database_path
+        .file_name()
+        .and_then(|v| v.to_str())
+        .unwrap_or("ClinicDesk-backup.sqlite3");
+    database_path.with_file_name(format!("{name}.attachments"))
+}
+
+fn safe_attachment_name(stored_name: &str) -> Result<(), String> {
+    if stored_name.is_empty()
+        || Path::new(stored_name).file_name().and_then(|v| v.to_str()) != Some(stored_name)
+    {
+        return Err("اسم مرفق غير صالح داخل النسخة الاحتياطية".into());
+    }
+    Ok(())
+}
+
 pub fn verify_database(path: &Path, expected_schema: i64) -> Result<(), String> {
     let db = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|_| "تعذر فتح ملف النسخة الاحتياطية".to_string())?;
@@ -37,6 +54,83 @@ pub fn verify_database(path: &Path, expected_schema: i64) -> Result<(), String> 
         ));
     }
     Ok(())
+}
+
+pub fn verify_attachment_backup(database_path: &Path) -> Result<(), String> {
+    let db = Connection::open_with_flags(database_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|_| "تعذر فتح ملف النسخة الاحتياطية".to_string())?;
+    let sidecar = attachment_sidecar(database_path);
+    let mut stmt = db
+        .prepare("SELECT stored_name,size_bytes,sha256 FROM attachments ORDER BY id")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, i64>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let (stored_name, size_bytes, expected_hash) = row.map_err(|e| e.to_string())?;
+        safe_attachment_name(&stored_name)?;
+        let path = sidecar.join(&stored_name);
+        let metadata = fs::metadata(&path)
+            .map_err(|_| format!("المرفق {stored_name} مفقود من النسخة الاحتياطية"))?;
+        if !metadata.is_file() || metadata.len() != size_bytes as u64 {
+            return Err(format!("حجم المرفق {stored_name} لا يطابق قاعدة البيانات"));
+        }
+        if sha256_file(&path)? != expected_hash.to_ascii_lowercase() {
+            return Err(format!("فشل التحقق من بصمة المرفق {stored_name}"));
+        }
+    }
+    Ok(())
+}
+
+pub fn create_attachment_backup(
+    conn: &Connection,
+    attachment_root: &Path,
+    database_path: &Path,
+) -> Result<(), String> {
+    let sidecar = attachment_sidecar(database_path);
+    if sidecar.exists() {
+        return Err("مجلد مرفقات النسخة الاحتياطية موجود مسبقاً".into());
+    }
+    fs::create_dir_all(&sidecar).map_err(|e| e.to_string())?;
+    let result = (|| {
+        let mut stmt = conn
+            .prepare("SELECT stored_name,size_bytes,sha256 FROM attachments ORDER BY id")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, i64>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        for row in rows {
+            let (stored_name, size_bytes, expected_hash) = row.map_err(|e| e.to_string())?;
+            safe_attachment_name(&stored_name)?;
+            let source = attachment_root.join(&stored_name);
+            let metadata = fs::metadata(&source)
+                .map_err(|_| format!("المرفق {stored_name} مفقود من مجلد البرنامج"))?;
+            if !metadata.is_file() || metadata.len() != size_bytes as u64 {
+                return Err(format!("حجم المرفق {stored_name} لا يطابق السجل"));
+            }
+            if sha256_file(&source)? != expected_hash.to_ascii_lowercase() {
+                return Err(format!("فشل التحقق من بصمة المرفق {stored_name}"));
+            }
+            fs::copy(&source, sidecar.join(&stored_name)).map_err(|e| e.to_string())?;
+        }
+        verify_attachment_backup(database_path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(&sidecar);
+    }
+    result
 }
 
 pub fn create_database_backup(
@@ -101,9 +195,6 @@ pub fn restore_database(
     let old = std::mem::replace(current, placeholder);
     drop(old);
 
-    // Windows does not reliably allow renaming over an existing SQLite file.
-    // The verified rollback snapshot is already durable, so remove the closed
-    // live file before promoting the verified staged database.
     if let Err(e) = fs::remove_file(live_path) {
         if e.kind() != std::io::ErrorKind::NotFound {
             *current = Connection::open(live_path).map_err(|open| open.to_string())?;
@@ -175,6 +266,41 @@ mod tests {
         drop(conn);
         let _ = fs::remove_file(source);
         let _ = fs::remove_file(backup);
+    }
+
+    #[test]
+    fn attachment_backup_detects_tampering() {
+        let source = temp("attachment-source");
+        let backup = temp("attachment-backup");
+        let root = attachment_sidecar(&source);
+        fs::create_dir_all(&root).unwrap();
+        let bytes = b"verified attachment";
+        let stored_name = "abc.pdf";
+        fs::write(root.join(stored_name), bytes).unwrap();
+        let conn = Connection::open(&source).unwrap();
+        super::super::migrate_db(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+            [],
+        )
+        .unwrap();
+        let patient_id = conn.last_insert_rowid();
+        let hash = format!("{:x}", Sha256::digest(bytes));
+        conn.execute(
+            "INSERT INTO attachments(patient_id,stored_name,original_name,size_bytes,sha256) VALUES(?1,?2,'report.pdf',?3,?4)",
+            rusqlite::params![patient_id, stored_name, bytes.len() as i64, hash],
+        )
+        .unwrap();
+        create_database_backup(&conn, &backup, super::super::LATEST_SCHEMA_VERSION).unwrap();
+        create_attachment_backup(&conn, &root, &backup).unwrap();
+        verify_attachment_backup(&backup).unwrap();
+        fs::write(attachment_sidecar(&backup).join(stored_name), b"tampered").unwrap();
+        assert!(verify_attachment_backup(&backup).is_err());
+        drop(conn);
+        let _ = fs::remove_file(source);
+        let _ = fs::remove_file(backup);
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(attachment_sidecar(&backup));
     }
 
     #[test]
