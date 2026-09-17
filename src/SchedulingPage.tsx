@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { CalendarOff, Clock3, DatabaseBackup, FolderUp, Plus, Save, Trash2 } from 'lucide-react';
 import { open, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { api, ClosureDate, SchedulingSettings } from './api';
+import { fullGregorianDate } from './dateDisplay';
 
 const initial: SchedulingSettings = {
   workStart: '08:00',
@@ -143,7 +144,7 @@ export function SchedulingPage() {
             <label>السبب<input disabled={busy} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="مثال: إجازة رسمية" /></label>
             <button type="button" className="primary" disabled={busy || !date} onClick={add}><Plus aria-hidden="true" />إضافة</button>
           </div>
-          {closures.length === 0 ? <div className="emptyState"><CalendarOff aria-hidden="true" /><b>لا توجد أيام إغلاق مسجلة</b><span>أضف يومًا فقط عند الحاجة.</span></div> : <div className="closureList">{closures.map((c) => <div className="closureRow" key={c.id}><div><b>{new Date(c.closureDate + 'T00:00:00').toLocaleDateString('ar-SA-u-ca-gregory')}</b><span>{c.reason || 'بدون سبب'}</span></div><button type="button" className="iconButton danger" disabled={busy} onClick={() => void remove(c.id)} title="حذف" aria-label={`حذف يوم الإغلاق ${c.closureDate}`}><Trash2 aria-hidden="true" /></button></div>)}</div>}
+          {closures.length === 0 ? <div className="emptyState"><CalendarOff aria-hidden="true" /><b>لا توجد أيام إغلاق مسجلة</b><span>أضف يومًا فقط عند الحاجة.</span></div> : <div className="closureList">{closures.map((c) => <div className="closureRow" key={c.id}><div><b>{fullGregorianDate(c.closureDate)}</b><span>{c.reason || 'بدون سبب'}</span></div><button type="button" className="iconButton danger" disabled={busy} onClick={() => void remove(c.id)} title="حذف" aria-label={`حذف يوم الإغلاق ${c.closureDate}`}><Trash2 aria-hidden="true" /></button></div>)}</div>}
         </div>
         <div className="card">
           <div className="cardHeading"><DatabaseBackup aria-hidden="true" /><div><h2>النسخ الاحتياطي والاستعادة</h2><p>ينشئ النظام نسخة SQLite متسقة ويتحقق من سلامتها وإصدارها قبل قبولها.</p></div></div>
