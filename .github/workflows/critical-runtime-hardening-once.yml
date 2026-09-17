@@ -30,6 +30,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf imagemagick
+      - name: Generate RGBA Linux Tauri icon
+        run: convert 'src-tauri/icons/icon.ico[0]' -alpha on -channel RGBA -depth 8 PNG32:src-tauri/icons/icon.png
       - name: Apply critical runtime fixes
         run: python scripts/release-hardening-critical.py
       - name: Format Rust
