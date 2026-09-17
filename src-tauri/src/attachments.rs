@@ -10,9 +10,9 @@ use uuid::Uuid;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ACTIVE_ATTACHMENTS: i64 = 20;
 const BLOCKED_EXTENSIONS: &[&str] = &[
-    "exe", "com", "bat", "cmd", "msi", "msp", "scr", "ps1", "psm1", "vbs", "vbe", "js",
-    "jse", "wsf", "wsh", "hta", "lnk", "url", "reg", "dll", "sys", "cpl", "jar", "html",
-    "htm", "xhtml", "svg", "chm",
+    "exe", "com", "bat", "cmd", "msi", "msp", "scr", "ps1", "psm1", "vbs", "vbe", "js", "jse",
+    "wsf", "wsh", "hta", "lnk", "url", "reg", "dll", "sys", "cpl", "jar", "html", "htm", "xhtml",
+    "svg", "chm",
 ];
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -410,17 +410,37 @@ mod tests {
     }
     #[test]
     fn blocks_executable_and_active_content_extensions() {
-        for name in ["evil.exe", "script.ps1", "active.html", "vector.svg", "help.chm"] {
-            assert!(extension(Path::new(name)).is_err(), "{name} must be blocked");
+        for name in [
+            "evil.exe",
+            "script.ps1",
+            "active.html",
+            "vector.svg",
+            "help.chm",
+        ] {
+            assert!(
+                extension(Path::new(name)).is_err(),
+                "{name} must be blocked"
+            );
         }
-        for name in ["report.pdf", "scan.jpg", "note.docx", "sheet.xlsx", "slides.pptx", "image.tiff", "scan.dcm"] {
+        for name in [
+            "report.pdf",
+            "scan.jpg",
+            "note.docx",
+            "sheet.xlsx",
+            "slides.pptx",
+            "image.tiff",
+            "scan.dcm",
+        ] {
             assert!(extension(Path::new(name)).is_ok(), "{name} must be allowed");
         }
     }
     #[test]
     fn common_formats_get_specific_mime_types() {
         assert_eq!(mime_for("pdf"), "application/pdf");
-        assert_eq!(mime_for("pptx"), "application/vnd.openxmlformats-officedocument.presentationml.presentation");
+        assert_eq!(
+            mime_for("pptx"),
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        );
         assert_eq!(mime_for("dcm"), "application/dicom");
         assert_eq!(mime_for("unknownsafe"), "application/octet-stream");
     }
