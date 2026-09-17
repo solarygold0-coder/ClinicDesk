@@ -23,7 +23,7 @@ jobs:
         with:
           components: rustfmt
       - name: Apply uncovered requirement fixes and tests
-        run: python scripts/apply-qa-gap-closure.py
+        run: python -X utf8 scripts/apply-qa-gap-closure.py
       - name: Format Rust workspace
         run: cargo fmt --all
       - name: Validate frontend and permanent contracts
