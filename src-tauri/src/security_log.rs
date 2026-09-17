@@ -58,7 +58,11 @@ pub fn append(
         "details": details,
         "previous_hash": previous_hash,
     });
-    let event_hash = hash_bytes(serde_json::to_string(&canonical).map_err(|e| e.to_string())?.as_bytes());
+    let event_hash = hash_bytes(
+        serde_json::to_string(&canonical)
+            .map_err(|e| e.to_string())?
+            .as_bytes(),
+    );
     let event = SecurityEvent {
         event_id: canonical["event_id"].as_str().unwrap().to_string(),
         occurred_at: canonical["occurred_at"].as_str().unwrap().to_string(),
@@ -86,7 +90,8 @@ mod tests {
 
     #[test]
     fn events_form_a_hash_chain_and_refuse_corrupt_tail() {
-        let path = std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
         append(&path, "restore", "started", Some("RST-1"), None).unwrap();
         append(&path, "restore", "success", Some("RST-1"), None).unwrap();
         let lines: Vec<serde_json::Value> = fs::read_to_string(&path)
