@@ -95,7 +95,7 @@ pub fn append_operation(
 }
 fn safe_detail(details: Option<&str>) -> Option<String> {
     details.map(|raw| {
-        let mut value = raw.replace('\r', " ").replace('\n', " ").replace('\\', "/");
+        let mut value = raw.replace(['\r', '\n'], " ").replace('\\', "/");
         for marker in [
             "password",
             "passwd",
