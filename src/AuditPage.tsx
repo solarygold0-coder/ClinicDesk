@@ -4,6 +4,12 @@ import { api, AuditEntry } from './api';
 
 const eventLabels: Record<string, string> = {
   create: 'إنشاء', update: 'تعديل', delete: 'أرشفة/حذف', status: 'تغيير حالة',
+  appointment_status_changed: 'تغيير حالة موعد',
+  provider_unavailability_created: 'تسجيل تعذّر معالج',
+  provider_unavailability_transfer: 'تحويل موعد بسبب تعذّر المعالج',
+  provider_unavailability_reschedule: 'إعادة جدولة بسبب تعذّر المعالج',
+  provider_unavailability_cancel: 'إلغاء بسبب تعذّر المعالج',
+  provider_unavailability_replacement_created: 'إنشاء موعد بديل بسبب تعذّر المعالج',
   user_created: 'إنشاء مستخدم', user_updated: 'تعديل مستخدم', user_status_changed: 'تغيير حالة مستخدم',
   user_password_reset: 'إعادة تعيين كلمة المرور', system_bootstrap: 'تهيئة النظام',
   attachment_added: 'إضافة مرفق', attachment_archived: 'أرشفة مرفق', attachment_restored: 'استعادة مرفق',
@@ -12,7 +18,10 @@ const eventLabels: Record<string, string> = {
   clinic_deactivated: 'تعطيل عيادة', doctor_created: 'إضافة طبيب', doctor_updated: 'تعديل طبيب', doctor_deactivated: 'تعطيل طبيب',
   scheduling_updated: 'تعديل ساعات العمل', closure_created: 'إضافة يوم إغلاق', closure_deleted: 'حذف يوم إغلاق',
 };
-const entityLabels: Record<string, string> = { patient:'مريض', appointment:'موعد', user:'مستخدم', database:'قاعدة البيانات', clinic:'عيادة', doctor:'طبيب', attachment:'مرفق', scheduling:'الإعدادات', closure:'يوم إغلاق', security:'الأمان' };
+const entityLabels: Record<string, string> = {
+  patient:'مريض', appointment:'موعد', user:'مستخدم', database:'قاعدة البيانات', clinic:'عيادة', doctor:'طبيب',
+  attachment:'مرفق', scheduling:'الإعدادات', closure:'يوم إغلاق', security:'الأمان', provider_unavailability:'تعذّر معالج'
+};
 
 export function AuditPage({ initialEmployeeCode = '' }: { initialEmployeeCode?: string }) {
   const [rows, setRows] = useState<AuditEntry[]>([]);
