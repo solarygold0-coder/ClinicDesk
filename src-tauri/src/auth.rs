@@ -3,7 +3,7 @@ use argon2::{
     Argon2,
 };
 use chrono::{Duration, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -69,6 +69,60 @@ fn valid_status(status: &str) -> Result<&str, String> {
 
 fn is_admin_role(role: &str) -> bool {
     matches!(role, "general_manager" | "deputy_manager")
+}
+
+fn ensure_runtime_audit_trigger(db: &Connection) -> Result<(), String> {
+    db.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS audit_fill_runtime_actor
+         AFTER INSERT ON audit_log
+         WHEN NEW.actor_user_id IS NULL
+          AND EXISTS(SELECT 1 FROM app_meta WHERE key='runtime_actor_user_id')
+         BEGIN
+           UPDATE audit_log
+              SET actor_user_id=CAST((SELECT value FROM app_meta WHERE key='runtime_actor_user_id') AS INTEGER),
+                  actor_display_name=(SELECT value FROM app_meta WHERE key='runtime_actor_display_name'),
+                  actor_employee_code=(SELECT value FROM app_meta WHERE key='runtime_actor_employee_code'),
+                  actor_session_id=(SELECT value FROM app_meta WHERE key='runtime_actor_session_id')
+            WHERE id=NEW.id;
+         END;",
+    )
+    .map_err(|e| e.to_string())
+}
+
+fn set_runtime_actor(db: &Connection, user: &UserSummary, session_id: &str) -> Result<(), String> {
+    ensure_runtime_audit_trigger(db)?;
+    for (key, value) in [
+        ("runtime_actor_user_id", user.id.to_string()),
+        ("runtime_actor_display_name", user.display_name.clone()),
+        ("runtime_actor_employee_code", user.employee_code.clone()),
+        ("runtime_actor_session_id", session_id.to_string()),
+    ] {
+        db.execute(
+            "INSERT OR REPLACE INTO app_meta(key,value) VALUES(?1,?2)",
+            params![key, value],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn clear_runtime_actor(db: &Connection, session_id: &str) -> Result<(), String> {
+    let current: Option<String> = db
+        .query_row(
+            "SELECT value FROM app_meta WHERE key='runtime_actor_session_id'",
+            [],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if current.as_deref() == Some(session_id) {
+        db.execute(
+            "DELETE FROM app_meta WHERE key LIKE 'runtime_actor_%'",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 pub fn hash_password(password: &str) -> Result<String, String> {
@@ -227,27 +281,31 @@ pub fn authenticate(
         params![token, id, expires_at],
     )
     .map_err(|e| e.to_string())?;
+    let user = summary_by_id(db, id)?;
+    set_runtime_actor(db, &user, &token)?;
     Ok(AuthSession {
         token,
         expires_at,
-        user: summary_by_id(db, id)?,
+        user,
     })
 }
 
 pub fn validate_session(db: &Connection, token: String) -> Result<UserSummary, String> {
     let token = required(&token, "رمز الجلسة")?;
-    let id: i64 = db.query_row("SELECT s.user_id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.id=?1 AND s.revoked_at IS NULL AND datetime(s.expires_at)>datetime('now') AND u.is_active=1 AND u.account_status='ACTIVE'", [token], |r| r.get(0)).map_err(|_| "الجلسة غير صالحة أو منتهية".to_string())?;
-    summary_by_id(db, id)
+    let id: i64 = db.query_row("SELECT s.user_id FROM auth_sessions s JOIN users u ON u.id=s.user_id WHERE s.id=?1 AND s.revoked_at IS NULL AND datetime(s.expires_at)>datetime('now') AND u.is_active=1 AND u.account_status='ACTIVE'", [&token], |r| r.get(0)).map_err(|_| "الجلسة غير صالحة أو منتهية".to_string())?;
+    let user = summary_by_id(db, id)?;
+    set_runtime_actor(db, &user, &token)?;
+    Ok(user)
 }
 
 pub fn logout(db: &Connection, token: String) -> Result<(), String> {
     let token = required(&token, "رمز الجلسة")?;
     db.execute(
         "UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,CURRENT_TIMESTAMP) WHERE id=?1",
-        [token],
+        [&token],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
+    clear_runtime_actor(db, &token)
 }
 
 #[cfg(test)]
@@ -255,7 +313,7 @@ mod tests {
     use super::*;
     fn db() -> Connection {
         let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT NOT NULL COLLATE NOCASE UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,is_active INTEGER NOT NULL DEFAULT 1,is_system_admin INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,employee_code TEXT NOT NULL UNIQUE,role_type TEXT NOT NULL DEFAULT 'ordinary_employee',account_status TEXT NOT NULL DEFAULT 'ACTIVE',last_successful_login_at TEXT,closed_at TEXT,closed_reason TEXT,must_change_password INTEGER NOT NULL DEFAULT 0); CREATE TABLE identity_sequences(name TEXT PRIMARY KEY,next_value INTEGER NOT NULL); INSERT INTO identity_sequences VALUES('employee_code',1); CREATE TABLE auth_sessions(id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,expires_at TEXT NOT NULL,revoked_at TEXT);").unwrap();
+        db.execute_batch("CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE audit_log(id INTEGER PRIMARY KEY,event_type TEXT NOT NULL,entity_type TEXT NOT NULL,entity_id INTEGER,details_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,actor_user_id INTEGER,actor_display_name TEXT,actor_employee_code TEXT,actor_session_id TEXT,before_json TEXT,after_json TEXT,reason TEXT); CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT NOT NULL COLLATE NOCASE UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,is_active INTEGER NOT NULL DEFAULT 1,is_system_admin INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,employee_code TEXT NOT NULL UNIQUE,role_type TEXT NOT NULL DEFAULT 'ordinary_employee',account_status TEXT NOT NULL DEFAULT 'ACTIVE',last_successful_login_at TEXT,closed_at TEXT,closed_reason TEXT,must_change_password INTEGER NOT NULL DEFAULT 0); CREATE TABLE identity_sequences(name TEXT PRIMARY KEY,next_value INTEGER NOT NULL); INSERT INTO identity_sequences VALUES('employee_code',1); CREATE TABLE auth_sessions(id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,expires_at TEXT NOT NULL,revoked_at TEXT);").unwrap();
         db
     }
     #[test]
@@ -278,6 +336,34 @@ mod tests {
         assert!(!stored.contains("StrongPassword1"));
         let s = authenticate(&db, "GM".into(), "StrongPassword1".into()).unwrap();
         assert_eq!(validate_session(&db, s.token).unwrap().employee_code, "U01");
+    }
+    #[test]
+    fn login_context_stamps_following_audit_events() {
+        let mut db = db();
+        let user = create_user(
+            &mut db,
+            "auditor".into(),
+            "موظف تدقيق".into(),
+            "StrongPassword1".into(),
+            "general_manager".into(),
+        )
+        .unwrap();
+        let session = authenticate(&db, "auditor".into(), "StrongPassword1".into()).unwrap();
+        db.execute(
+            "INSERT INTO audit_log(event_type,entity_type) VALUES('test','patient')",
+            [],
+        )
+        .unwrap();
+        let actor: (i64, String, String) = db
+            .query_row(
+                "SELECT actor_user_id,actor_employee_code,actor_session_id FROM audit_log ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(actor.0, user.id);
+        assert_eq!(actor.1, user.employee_code);
+        assert_eq!(actor.2, session.token);
     }
     #[test]
     fn wrong_password_is_rejected() {
