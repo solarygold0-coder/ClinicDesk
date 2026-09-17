@@ -24,6 +24,8 @@ jobs:
           node-version: 22
       - name: Verify approved RTL/UI invariants
         run: node scripts/ui-contract.mjs
+      - name: Verify approved features are actually visible and wired
+        run: node scripts/visible-feature-contract.mjs
       - name: Verify Arabic lifecycle audit labels
         run: node scripts/audit-label-contract.mjs
       - name: Verify smart appointment scheduling advisories
