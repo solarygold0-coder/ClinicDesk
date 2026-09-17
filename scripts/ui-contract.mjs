@@ -16,13 +16,18 @@ const files = {
   scheduling: read('src/SchedulingPage.tsx'),
   directory: read('src/DirectoryPage.tsx'),
   attachments: read('src/PatientAttachments.tsx'),
+  providerUnavailability: read('src/ProviderUnavailabilityPage.tsx'),
+  providerCss: read('src/provider-unavailability.css'),
+  providerRust: read('src-tauri/src/provider_unavailability.rs'),
+  providerMigration: read('src-tauri/migrations/017_provider_unavailability.sql'),
+  runtime: read('src-tauri/src/lib.rs'),
   api: read('src/api.ts'),
   rtl: read('src/rtl.css'),
   print: read('src/print.css'),
   ui: read('src/ui-fixes.css'),
 };
 const t = Object.fromEntries(Object.entries(files).map(([key, value]) => [key, tight(value)]));
-const productText = [files.app, files.auth, files.users, files.audit, files.readOnlyAppointments, files.dashboard, files.patients, files.appointments, files.scheduling, files.directory, files.attachments].join('\n');
+const productText = [files.app, files.auth, files.users, files.audit, files.readOnlyAppointments, files.dashboard, files.patients, files.appointments, files.scheduling, files.directory, files.attachments, files.providerUnavailability].join('\n');
 
 const checks = [
   ['root app remains RTL', t.app.includes('className="app"dir="rtl"')],
@@ -48,6 +53,14 @@ const checks = [
   ['audit page exposes actor employee code and before-after details', files.audit.includes('دورة حياة الموظف وسجل العمليات') && files.audit.includes('actorEmployeeCode') && files.audit.includes('beforeJson') && files.audit.includes('afterJson')],
   ['clinical roles use a true read-only appointment surface', t.app.includes("restrictedClinical?<ReadOnlyAppointmentsPage/>:<AppointmentsPage") && files.readOnlyAppointments.includes('للقراءة فقط') && !files.readOnlyAppointments.includes('api.createAppointment') && !files.readOnlyAppointments.includes('api.updateAppointment') && !files.readOnlyAppointments.includes('api.appointmentStatus')],
   ['all operational API calls use authenticated wrapper', t.api.includes("constauthed=<T>(command:string,args:Record<string,unknown>={})=>invoke<T>(command,{...args,actorToken:actorToken??undefined})") && t.api.includes("patients:(query='')=>authed<Patient[]>('patient_list',{query,limit:50})") && t.api.includes("createBackup:(destinationPath:string)=>authed<string>('backup_create',{destinationPath})")],
+  ['provider unavailability navigation is visible only outside restricted clinical mode', files.app.includes('تعذّر المعالج') && t.app.includes("navigate('provider-unavailability')") && t.app.includes("page==='provider-unavailability'&&!restrictedClinical&&<ProviderUnavailabilityPage/>")],
+  ['provider unavailability stylesheet is loaded and responsive', files.main.includes("'./provider-unavailability.css'") && t.providerCss.includes('.providerUnavailabilityPage') && t.providerCss.includes('@media(max-width:900px)')],
+  ['provider unavailability reasons are structured and other reason requires a note', ['leave','sudden_absence','assignment_meeting','emergency','other'].every((reason)=>files.providerUnavailability.includes(reason)) && files.providerUnavailability.includes("reasonCode === 'other'") && files.providerUnavailability.includes("required={reasonCode === 'other'}")],
+  ['provider unavailability supports transfer reschedule and classified cancellation', files.providerUnavailability.includes('تحويل لمعالج بديل') && files.providerUnavailability.includes('إعادة جدولة') && files.providerUnavailability.includes('إلغاء بسبب تعذّر المعالج') && t.api.includes("ProviderResolutionAction='transfer'|'reschedule'|'cancel'")],
+  ['provider unavailability batches selected appointments atomically through one API call', files.providerUnavailability.includes('دفعة واحدة') && t.providerUnavailability.includes('api.resolveProviderUnavailability(event.id,resolutions)') && t.providerRust.includes('unchecked_transaction()')],
+  ['provider unavailability API commands use authenticated wrapper', t.api.includes("authed<ProviderUnavailabilityEvent>('provider_unavailability_create',{input})") && t.api.includes("authed<AffectedAppointment[]>('provider_unavailability_affected',{eventId})") && t.api.includes("authed<void>('provider_unavailability_resolve_many',{eventId,resolutions})")],
+  ['provider unavailability backend checks working window replacement capacity and preserves classification', files.providerRust.includes('validate_work_window') && files.providerRust.includes('ensure_capacity') && files.providerRust.includes("disruption_kind='provider_unavailable'") && files.providerRust.includes("disruption_resolution='cancel'")],
+  ['provider unavailability schema 17 and Tauri runtime are registered end to end', files.providerMigration.includes('provider_unavailability_events') && files.providerMigration.includes('provider_unavailability_actions') && files.runtime.includes('const LATEST_SCHEMA_VERSION: i64 = 17;') && files.runtime.includes('../migrations/017_provider_unavailability.sql') && files.runtime.includes('provider_unavailability_resolve_many')],
   ['one-click patient action is wired', t.dashboard.includes('onClick={onPatientAdd}')],
   ['one-click appointment action is wired', t.dashboard.includes('onClick={onAppointmentAdd}')],
   ['one-click patient search is wired', t.dashboard.includes('onClick={onPatientSearch}')],
@@ -89,8 +102,8 @@ const checks = [
   ['dashboard accessibility semantics are present', files.dashboard.includes('aria-expanded={showAlerts}') && files.dashboard.includes('aria-pressed={filter === key}') && files.dashboard.includes('role="alert"')],
 ];
 
-if (checks.length !== 62) {
-  console.error(`RTL/UI/accountability contract definition must contain exactly 62 checks, found ${checks.length}`);
+if (checks.length !== 70) {
+  console.error(`RTL/UI/accountability contract definition must contain exactly 70 checks, found ${checks.length}`);
   process.exit(1);
 }
 const failed = checks.filter(([, ok]) => !ok);
