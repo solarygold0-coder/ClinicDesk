@@ -18,14 +18,6 @@ fn authorize_user_management(
     Ok(())
 }
 
-fn authorize_security_management(
-    conn: &rusqlite::Connection,
-    actor_token: Option<&str>,
-) -> Result<(), String> {
-    authorization::authorize(conn, actor_token, authorization::SECURITY_MANAGE)?;
-    Ok(())
-}
-
 #[tauri::command]
 pub fn user_list(
     db: tauri::State<Db>,
@@ -101,8 +93,7 @@ pub fn deputy_restore_permission_get(
     actor_token: Option<String>,
 ) -> Result<bool, String> {
     with_db(&db, |conn| {
-        authorize_security_management(conn, actor_token.as_deref())?;
-        authorization::deputy_restore_granted(conn)
+        authorization::deputy_restore_granted(conn, actor_token.as_deref())
     })
 }
 
@@ -113,8 +104,7 @@ pub fn deputy_restore_permission_set(
     enabled: bool,
 ) -> Result<(), String> {
     with_db(&db, |conn| {
-        authorize_security_management(conn, actor_token.as_deref())?;
-        authorization::set_deputy_restore_grant(conn, enabled)
+        authorization::set_deputy_restore_grant(conn, actor_token.as_deref(), enabled)
     })
 }
 
