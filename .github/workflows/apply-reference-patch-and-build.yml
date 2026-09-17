@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: apply-reference-patch-and-build
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   apply-validate-build:
@@ -29,14 +29,15 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - name: Reassemble and verify reference patch
+      - id: reassemble
+        name: Reassemble and verify reference patch
+        continue-on-error: true
         shell: python
         run: |
           from pathlib import Path
@@ -56,13 +57,19 @@ jobs:
           Path("09c65e4-local-fixes.patch").write_bytes(raw)
           print(f"Verified patch: {len(raw)} bytes, SHA-256 {actual}")
 
-      - name: Apply local fixes patch
+      - id: patch
+        name: Apply local fixes patch
+        if: steps.reassemble.outcome == 'success'
+        continue-on-error: true
         shell: bash
         run: |
           git apply --check 09c65e4-local-fixes.patch
           git apply --whitespace=nowarn 09c65e4-local-fixes.patch
 
-      - name: Normalize npm lockfile registry URLs
+      - id: lock
+        name: Normalize npm lockfile registry URLs
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
         shell: python
         run: |
           from pathlib import Path
@@ -85,51 +92,89 @@ jobs:
           path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           print(f"Normalized {changed} resolved package URLs")
 
-      - name: Install frontend dependencies
+      - id: npmci
+        name: Install frontend dependencies
+        if: steps.lock.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm ci
 
-      - name: Frontend build
+      - id: frontend
+        name: Frontend build
+        if: steps.npmci.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm run build
 
-      - name: UI contract
+      - id: uicontract
+        name: UI contract
+        if: steps.frontend.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm run test:ui-contract
 
-      - name: Rust format
+      - id: rustfmt
+        name: Rust format
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
 
-      - name: Rust clippy
+      - id: clippy
+        name: Rust clippy
+        if: steps.rustfmt.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      - name: Rust tests
+      - id: rusttest
+        name: Rust tests
+        if: steps.clippy.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Build Windows MSI and NSIS
+      - id: tauri
+        name: Build Windows MSI and NSIS
+        if: steps.uicontract.outcome == 'success' && steps.rusttest.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm run tauri -- build
 
-      - name: Prepare clean verified commit
+      - name: Write diagnostic failure report
+        if: always() && steps.tauri.outcome != 'success'
         shell: pwsh
         run: |
-          if (Test-Path ".clinicdesk-handoff") { Remove-Item -Recurse -Force ".clinicdesk-handoff" }
-          if (Test-Path "09c65e4-local-fixes.patch") { Remove-Item -Force "09c65e4-local-fixes.patch" }
-          if (Test-Path ".github/workflows/apply-reference-patch-and-build.yml") { Remove-Item -Force ".github/workflows/apply-reference-patch-and-build.yml" }
-          git status --short
+          New-Item -ItemType Directory -Force docs/reference | Out-Null
+          @"
+          # Reference branch CI diagnostic
+
+          Commit under test: $env:GITHUB_SHA
+          Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+
+          - reassemble: ${{ steps.reassemble.outcome }}
+          - patch: ${{ steps.patch.outcome }}
+          - lock normalization: ${{ steps.lock.outcome }}
+          - npm ci: ${{ steps.npmci.outcome }}
+          - frontend build: ${{ steps.frontend.outcome }}
+          - UI contract: ${{ steps.uicontract.outcome }}
+          - rustfmt: ${{ steps.rustfmt.outcome }}
+          - clippy: ${{ steps.clippy.outcome }}
+          - rust tests: ${{ steps.rusttest.outcome }}
+          - tauri windows build: ${{ steps.tauri.outcome }}
+          "@ | Out-File -Encoding utf8 docs/reference/CI-LAST-FAILURE.md
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Apply verified local fixes from 09c65e4"
-
-      - name: Push verified commit
-        shell: pwsh
-        run: git push origin HEAD:reference/local-fixes-on-c9611579
+          git add docs/reference/CI-LAST-FAILURE.md
+          if (-not (git diff --cached --quiet)) {
+            git commit -m "Record reference branch CI failure"
+            git push origin HEAD:reference/local-fixes-on-c9611579
+          }
+          exit 1
 
       - name: Collect installer hashes
+        if: steps.tauri.outcome == 'success'
         shell: pwsh
         run: |
           Get-ChildItem -Recurse src-tauri/target/release/bundle -File | ForEach-Object {
@@ -138,6 +183,7 @@ jobs:
           } | Out-File -Encoding utf8 SHA256SUMS-reference-build.txt
 
       - name: Upload Windows installers
+        if: steps.tauri.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: ClinicDesk-reference-Windows
@@ -146,3 +192,16 @@ jobs:
             src-tauri/target/release/bundle/nsis/*.exe
             SHA256SUMS-reference-build.txt
           if-no-files-found: error
+
+      - name: Push clean verified source commit
+        if: steps.tauri.outcome == 'success'
+        shell: pwsh
+        run: |
+          if (Test-Path ".clinicdesk-handoff") { Remove-Item -Recurse -Force ".clinicdesk-handoff" }
+          if (Test-Path "09c65e4-local-fixes.patch") { Remove-Item -Force "09c65e4-local-fixes.patch" }
+          if (Test-Path ".github/workflows/apply-reference-patch-and-build.yml") { Remove-Item -Force ".github/workflows/apply-reference-patch-and-build.yml" }
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Apply verified local fixes from 09c65e4"
+          git push origin HEAD:reference/local-fixes-on-c9611579
