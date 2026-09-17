@@ -59,6 +59,8 @@ const checks = [
   ['provider unavailability supports transfer reschedule and classified cancellation', files.providerUnavailability.includes('تحويل لمعالج بديل') && files.providerUnavailability.includes('إعادة جدولة') && files.providerUnavailability.includes('إلغاء بسبب تعذّر المعالج') && t.api.includes("ProviderResolutionAction='transfer'|'reschedule'|'cancel'")],
   ['provider unavailability batches selected appointments atomically through one API call', files.providerUnavailability.includes('دفعة واحدة') && t.providerUnavailability.includes('api.resolveProviderUnavailability(event.id,resolutions)') && t.providerRust.includes('unchecked_transaction()')],
   ['provider unavailability API commands use authenticated wrapper', t.api.includes("authed<ProviderUnavailabilityEvent>('provider_unavailability_create',{input})") && t.api.includes("authed<AffectedAppointment[]>('provider_unavailability_affected',{eventId})") && t.api.includes("authed<void>('provider_unavailability_resolve_many',{eventId,resolutions})")],
+  ['provider unavailability open events can be resumed after restart', t.api.includes("providerUnavailabilityOpen:()=>authed<ProviderUnavailabilityEvent[]>('provider_unavailability_list_open')") && files.providerUnavailability.includes('حالات تعذّر مفتوحة تحتاج استكمال') && t.providerUnavailability.includes('resumeEvent(item)')],
+  ['provider unavailability backend exposes authenticated open-event listing', t.providerRust.includes('pubfnlist_open_events') && files.runtime.includes('provider_unavailability_list_open')],
   ['provider unavailability backend checks working window replacement capacity and preserves classification', files.providerRust.includes('validate_work_window') && files.providerRust.includes('ensure_capacity') && files.providerRust.includes("disruption_kind='provider_unavailable'") && files.providerRust.includes("disruption_resolution='cancel'")],
   ['provider unavailability schema 17 and Tauri runtime are registered end to end', files.providerMigration.includes('provider_unavailability_events') && files.providerMigration.includes('provider_unavailability_actions') && files.runtime.includes('const LATEST_SCHEMA_VERSION: i64 = 17;') && files.runtime.includes('../migrations/017_provider_unavailability.sql') && files.runtime.includes('provider_unavailability_resolve_many')],
   ['one-click patient action is wired', t.dashboard.includes('onClick={onPatientAdd}')],
@@ -102,8 +104,8 @@ const checks = [
   ['dashboard accessibility semantics are present', files.dashboard.includes('aria-expanded={showAlerts}') && files.dashboard.includes('aria-pressed={filter === key}') && files.dashboard.includes('role="alert"')],
 ];
 
-if (checks.length !== 70) {
-  console.error(`RTL/UI/accountability contract definition must contain exactly 70 checks, found ${checks.length}`);
+if (checks.length !== 72) {
+  console.error(`RTL/UI/accountability contract definition must contain exactly 72 checks, found ${checks.length}`);
   process.exit(1);
 }
 const failed = checks.filter(([, ok]) => !ok);

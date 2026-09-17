@@ -32,8 +32,9 @@ const actionLabels: Record<ProviderResolutionAction, string> = {
 };
 
 const localDateTime = (value: string) => value.slice(0, 16);
-const displayDateTime = (value: string) =>
-  new Date(value).toLocaleString('ar-SA-u-ca-gregory', {
+const displayDateTime = (value: string) => {
+  const date = new Date(value);
+  const text = date.toLocaleString('ar-SA-u-ca-gregory', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
@@ -41,9 +42,12 @@ const displayDateTime = (value: string) =>
     hour: '2-digit',
     minute: '2-digit',
   });
+  return `${text} • الشهر ${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
 
 export function ProviderUnavailabilityPage() {
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [openEvents, setOpenEvents] = useState<ProviderUnavailabilityEvent[]>([]);
   const [doctorId, setDoctorId] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
@@ -57,7 +61,12 @@ export function ProviderUnavailabilityPage() {
   const [message, setMessage] = useState('');
 
   useEffect(() => {
-    api.doctors().then(setDoctors).catch((e) => setError(String(e)));
+    Promise.all([api.doctors(), api.providerUnavailabilityOpen()])
+      .then(([doctorRows, eventRows]) => {
+        setDoctors(doctorRows);
+        setOpenEvents(eventRows);
+      })
+      .catch((e) => setError(String(e)));
   }, []);
 
   const originalDoctor = useMemo(
@@ -93,6 +102,28 @@ export function ProviderUnavailabilityPage() {
     if (rows.length === 0) setMessage('لا توجد مواعيد متبقية تحتاج معالجة ضمن فترة التعذّر.');
   }
 
+  async function resumeEvent(item: ProviderUnavailabilityEvent) {
+    if (busy) return;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      setEvent(item);
+      setDoctorId(String(item.doctorId));
+      setFrom(localDateTime(item.unavailableFrom));
+      setTo(localDateTime(item.unavailableTo));
+      setReasonCode(item.reasonCode);
+      setReasonNote(item.reasonNote || '');
+      await refreshAffected(item.id);
+      setMessage('تم استئناف حالة التعذّر المفتوحة وتحميل المواعيد التي ما زالت تحتاج معالجة.');
+    } catch (e) {
+      setEvent(null);
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function registerEvent(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -111,6 +142,7 @@ export function ProviderUnavailabilityPage() {
         reasonNote: reasonNote.trim() || undefined,
       });
       setEvent(created);
+      setOpenEvents((current) => [created, ...current.filter((item) => item.id !== created.id)]);
       await refreshAffected(created.id);
       setMessage('تم تسجيل تعذّر المعالج واستخراج المواعيد المتأثرة.');
     } catch (e) {
@@ -159,6 +191,7 @@ export function ProviderUnavailabilityPage() {
       if (resolutions.length === 0) throw new Error('اختر موعدًا واحدًا على الأقل للمعالجة');
       await api.resolveProviderUnavailability(event.id, resolutions);
       await refreshAffected(event.id);
+      setOpenEvents(await api.providerUnavailabilityOpen());
       setMessage(`تمت معالجة ${resolutions.length} موعد/مواعيد دفعة واحدة مع حفظ دورة الحياة.`);
     } catch (e) {
       setError(String(e));
@@ -178,6 +211,7 @@ export function ProviderUnavailabilityPage() {
     setTo('');
     setReasonCode('sudden_absence');
     setReasonNote('');
+    void api.providerUnavailabilityOpen().then(setOpenEvents).catch((e) => setError(String(e)));
   }
 
   return (
@@ -192,6 +226,15 @@ export function ProviderUnavailabilityPage() {
 
       {error && <div className="notice errorText" role="alert">{error}</div>}
       {message && <div className="notice" role="status">{message}</div>}
+
+      {!event && openEvents.length > 0 && <div className="notice providerOpenEvents">
+        <strong>حالات تعذّر مفتوحة تحتاج استكمال</strong>
+        <div className="providerOpenEventList">
+          {openEvents.map((item) => <button type="button" key={item.id} disabled={busy} onClick={() => void resumeEvent(item)}>
+            استئناف {doctors.find((doctor) => doctor.id === item.doctorId)?.name || `المعالج #${item.doctorId}`} — {displayDateTime(item.unavailableFrom)}
+          </button>)}
+        </div>
+      </div>}
 
       {!event ? (
         <form className="settingsGrid" onSubmit={registerEvent}>

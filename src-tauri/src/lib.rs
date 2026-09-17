@@ -387,6 +387,14 @@ fn appointment_status(
     appointment_status::set_status(&mut g, id, &status)
 }
 #[tauri::command]
+fn provider_unavailability_list_open(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+) -> Result<Vec<provider_unavailability::ProviderUnavailabilityEvent>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;
+    with_db(&db, provider_unavailability::list_open_events)
+}
+#[tauri::command]
 fn provider_unavailability_create(
     db: tauri::State<Db>,
     actor_token: Option<String>,
@@ -845,6 +853,7 @@ pub fn run() {
             appointment_create,
             appointment_update,
             appointment_status,
+            provider_unavailability_list_open,
             provider_unavailability_create,
             provider_unavailability_affected,
             provider_unavailability_resolve_many,

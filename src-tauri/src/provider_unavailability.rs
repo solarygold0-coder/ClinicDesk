@@ -324,6 +324,33 @@ pub fn create_event(
     Ok(event)
 }
 
+pub fn list_open_events(c: &Connection) -> Result<Vec<ProviderUnavailabilityEvent>, String> {
+    let mut stmt = c
+        .prepare(
+            "SELECT id,doctor_id,unavailable_from,unavailable_to,reason_code,reason_note,created_at,resolved_at
+             FROM provider_unavailability_events
+             WHERE resolved_at IS NULL
+             ORDER BY unavailable_from DESC,id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(ProviderUnavailabilityEvent {
+                id: r.get(0)?,
+                doctor_id: r.get(1)?,
+                unavailable_from: r.get(2)?,
+                unavailable_to: r.get(3)?,
+                reason_code: r.get(4)?,
+                reason_note: r.get(5)?,
+                created_at: r.get(6)?,
+                resolved_at: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
+
 pub fn affected_appointments(
     c: &Connection,
     event_id: i64,
