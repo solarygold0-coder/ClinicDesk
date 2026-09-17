@@ -52,7 +52,8 @@ pub fn list(db: &Connection) -> Result<Vec<UserAccount>, String> {
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map([], row_to_user).map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount, String> {
@@ -80,7 +81,13 @@ pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount,
     tx.execute(
         "INSERT INTO users(username,display_name,password_hash,is_system_admin,employee_code)
          VALUES(?1,?2,?3,?4,?5)",
-        params![username, display_name, password_hash, input.is_system_admin.unwrap_or(false) as i64, employee_code],
+        params![
+            username,
+            display_name,
+            password_hash,
+            input.is_system_admin.unwrap_or(false) as i64,
+            employee_code
+        ],
     )
     .map_err(|e| {
         if e.to_string().contains("users.username") {
