@@ -4,6 +4,7 @@ import { Dashboard } from './Dashboard';
 import { PatientsPage } from './PatientsPage';
 import { DirectoryPage } from './DirectoryPage';
 import { AppointmentsPage } from './AppointmentsPage';
+import { ReadOnlyAppointmentsPage } from './ReadOnlyAppointmentsPage';
 import { SchedulingPage } from './SchedulingPage';
 import { AuthGate } from './AuthGate';
 import { UsersPage } from './UsersPage';
@@ -79,7 +80,7 @@ export function App(){
       {page==='dashboard'&&!restrictedClinical&&<Dashboard onPatients={()=>openPatients()} onPatient={openPatients} onPatientAdd={()=>openPatientAction('add')} onPatientSearch={()=>openPatientAction('search')} onDirectory={()=>navigate('directory')} onAppointments={openAppointments} onAppointmentAdd={addAppointment}/>} 
       {page==='patients'&&!restrictedClinical&&<PatientsPage initialFileNo={patientFileNo} action={patientAction}/>} 
       {page==='directory'&&!restrictedClinical&&<DirectoryPage/>}
-      {page==='appointments'&&<AppointmentsPage onPatient={openPatients} action={appointmentAction}/>} 
+      {page==='appointments'&&(restrictedClinical?<ReadOnlyAppointmentsPage/>:<AppointmentsPage onPatient={openPatients} action={appointmentAction}/>)} 
       {page==='settings'&&!restrictedClinical&&<SchedulingPage/>}
       {page==='users'&&canManage&&<UsersPage currentUser={session.user} onLifecycle={openLifecycle}/>} 
       {page==='audit'&&canManage&&<AuditPage initialEmployeeCode={auditEmployee}/>} 
