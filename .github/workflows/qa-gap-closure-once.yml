@@ -1,0 +1,50 @@
+name: qa-gap-closure-once
+on:
+  push:
+    branches: [tauri-react-rebuild]
+permissions:
+  contents: write
+concurrency:
+  group: qa-gap-closure-once
+  cancel-in-progress: true
+jobs:
+  close-gaps:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply uncovered requirement fixes and tests
+        run: python scripts/apply-qa-gap-closure.py
+      - name: Format Rust workspace
+        run: cargo fmt --all
+      - name: Validate frontend and permanent contracts
+        run: |
+          npm install --ignore-scripts
+          npm run build
+          node scripts/ui-contract.mjs
+          node scripts/visible-feature-contract.mjs
+      - name: Run complete desktop Rust test suite
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Validate ClinicDesk Server permanently-buildable state
+        run: |
+          cargo check -p clinicdesk-server
+          cargo test -p clinicdesk-server
+      - name: Commit verified QA gap closure and remove helper
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/src/patients.rs src-tauri/src/appointments.rs src-tauri/src/auth.rs src-tauri/src/auth_commands.rs src-tauri/src/migration_tests.rs .github/workflows/build.yml .github/workflows/format-repair-current.yml docs/TEST_COVERAGE_MATRIX.md server/src Cargo.lock
+          git rm scripts/apply-qa-gap-closure.py .github/workflows/qa-gap-closure-once.yml
+          git commit -m "Close uncovered ClinicDesk requirement test gaps"
+          git pull --rebase origin tauri-react-rebuild
+          git push origin HEAD:tauri-react-rebuild
