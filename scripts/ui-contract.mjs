@@ -7,6 +7,7 @@ const files = {
   auth: read('src/AuthGate.tsx'),
   users: read('src/UsersPage.tsx'),
   audit: read('src/AuditPage.tsx'),
+  readOnlyAppointments: read('src/ReadOnlyAppointmentsPage.tsx'),
   accountability: read('src/accountability.css'),
   main: read('src/main.tsx'),
   dashboard: read('src/Dashboard.tsx'),
@@ -21,7 +22,7 @@ const files = {
   ui: read('src/ui-fixes.css'),
 };
 const t = Object.fromEntries(Object.entries(files).map(([key, value]) => [key, tight(value)]));
-const productText = [files.app, files.auth, files.users, files.audit, files.dashboard, files.patients, files.appointments, files.scheduling, files.directory, files.attachments].join('\n');
+const productText = [files.app, files.auth, files.users, files.audit, files.readOnlyAppointments, files.dashboard, files.patients, files.appointments, files.scheduling, files.directory, files.attachments].join('\n');
 
 const checks = [
   ['root app remains RTL', t.app.includes('className="app"dir="rtl"')],
@@ -40,10 +41,12 @@ const checks = [
   ['authentication gate blocks application until a session exists', t.app.includes('if(!session)return<AuthGate') && files.app.includes('onAuthenticated={setSession}')],
   ['first-run setup creates only a general manager then logs in', t.auth.includes("api.createUser(username.trim(),displayName.trim(),password,'general_manager')") && t.auth.includes('api.login(username.trim(),password)')],
   ['session token is restored validated and propagated', files.auth.includes("sessionStorage.getItem('clinicdesk.session')") && t.auth.includes('api.validateSession(saved)') && t.auth.includes('setActorToken(saved)')],
+  ['temporary passwords must be replaced before application access', files.auth.includes('mustChangePassword') && files.auth.includes('تغيير كلمة المرور المؤقتة') && t.auth.includes('api.changePassword(pendingSession.token,password,newPassword)') && t.api.includes("changePassword:(token:string,currentPassword:string,newPassword:string)=>invoke<UserSummary>('auth_validate_session',{token,currentPassword,newPassword})")],
   ['logout revokes session and clears frontend actor context', t.app.includes('api.logout(session.token)') && files.app.includes("sessionStorage.removeItem('clinicdesk.session')") && t.app.includes('setActorToken(null)')],
   ['users and lifecycle navigation are role gated', files.app.includes('المستخدمون والصلاحيات') && files.app.includes('سجل العمليات') && t.app.includes("session?.user.roleType==='general_manager'||session?.user.roleType==='deputy_manager'")],
   ['users page supports role status password and lifecycle controls', files.users.includes('إضافة مستخدم') && files.users.includes('دورة الحياة') && t.users.includes('api.setUserStatus(') && t.users.includes('api.resetUserPassword(') && t.users.includes('api.updateUser(')],
   ['audit page exposes actor employee code and before-after details', files.audit.includes('دورة حياة الموظف وسجل العمليات') && files.audit.includes('actorEmployeeCode') && files.audit.includes('beforeJson') && files.audit.includes('afterJson')],
+  ['clinical roles use a true read-only appointment surface', t.app.includes("restrictedClinical?<ReadOnlyAppointmentsPage/>:<AppointmentsPage") && files.readOnlyAppointments.includes('للقراءة فقط') && !files.readOnlyAppointments.includes('api.createAppointment') && !files.readOnlyAppointments.includes('api.updateAppointment') && !files.readOnlyAppointments.includes('api.appointmentStatus')],
   ['all operational API calls use authenticated wrapper', t.api.includes("constauthed=<T>(command:string,args:Record<string,unknown>={})=>invoke<T>(command,{...args,actorToken:actorToken??undefined})") && t.api.includes("patients:(query='')=>authed<Patient[]>('patient_list',{query,limit:50})") && t.api.includes("createBackup:(destinationPath:string)=>authed<string>('backup_create',{destinationPath})")],
   ['one-click patient action is wired', t.dashboard.includes('onClick={onPatientAdd}')],
   ['one-click appointment action is wired', t.dashboard.includes('onClick={onAppointmentAdd}')],
@@ -86,8 +89,8 @@ const checks = [
   ['dashboard accessibility semantics are present', files.dashboard.includes('aria-expanded={showAlerts}') && files.dashboard.includes('aria-pressed={filter === key}') && files.dashboard.includes('role="alert"')],
 ];
 
-if (checks.length !== 60) {
-  console.error(`RTL/UI/accountability contract definition must contain exactly 60 checks, found ${checks.length}`);
+if (checks.length !== 62) {
+  console.error(`RTL/UI/accountability contract definition must contain exactly 62 checks, found ${checks.length}`);
   process.exit(1);
 }
 const failed = checks.filter(([, ok]) => !ok);
