@@ -1,6 +1,8 @@
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
+pub const MAX_USER_ACCOUNTS: i64 = 62;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserAccount {
     pub id: i64,
@@ -49,9 +51,7 @@ pub fn list(db: &Connection) -> Result<Vec<UserAccount>, String> {
              FROM users ORDER BY id",
         )
         .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], row_to_user)
-        .map_err(|e| e.to_string())?;
+    let rows = stmt.query_map([], row_to_user).map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
@@ -60,6 +60,12 @@ pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount,
     let display_name = clean_required(&input.display_name, "اسم الموظف")?;
     let password_hash = clean_required(&input.password_hash, "بصمة كلمة المرور")?;
     let tx = db.transaction().map_err(|e| e.to_string())?;
+    let total: i64 = tx
+        .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if total >= MAX_USER_ACCOUNTS {
+        return Err("تم بلوغ الحد الأقصى لحسابات النظام (62 مستخدمًا)".into());
+    }
     let next: i64 = tx
         .query_row(
             "SELECT next_value FROM identity_sequences WHERE name='employee_code'",
@@ -67,7 +73,10 @@ pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount,
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    let employee_code = format!("U{next:06}");
+    if next > MAX_USER_ACCOUNTS {
+        return Err("نفدت رموز المستخدمين الدائمة U01-U62؛ الرموز المعطلة لا يعاد استخدامها".into());
+    }
+    let employee_code = format!("U{next:02}");
     tx.execute(
         "INSERT INTO users(username,display_name,password_hash,is_system_admin,employee_code)
          VALUES(?1,?2,?3,?4,?5)",
@@ -133,15 +142,34 @@ mod tests {
         db
     }
 
+    fn input(n: i64) -> NewUserAccount {
+        NewUserAccount {
+            username: format!("user{n}"),
+            display_name: format!("مستخدم {n}"),
+            password_hash: "hash".into(),
+            is_system_admin: None,
+        }
+    }
+
     #[test]
-    fn allocates_permanent_codes_without_reuse() {
+    fn allocates_short_permanent_codes_without_reuse() {
         let mut db = db();
-        let first = create(&mut db, NewUserAccount { username: "one".into(), display_name: "الأول".into(), password_hash: "hash".into(), is_system_admin: None }).unwrap();
-        let second = create(&mut db, NewUserAccount { username: "two".into(), display_name: "الثاني".into(), password_hash: "hash".into(), is_system_admin: None }).unwrap();
-        assert_eq!(first.employee_code, "U000001");
-        assert_eq!(second.employee_code, "U000002");
+        let first = create(&mut db, input(1)).unwrap();
+        let second = create(&mut db, input(2)).unwrap();
+        assert_eq!(first.employee_code, "U01");
+        assert_eq!(second.employee_code, "U02");
         set_active(&db, first.id, false).unwrap();
-        let third = create(&mut db, NewUserAccount { username: "three".into(), display_name: "الثالث".into(), password_hash: "hash".into(), is_system_admin: None }).unwrap();
-        assert_eq!(third.employee_code, "U000003");
+        let third = create(&mut db, input(3)).unwrap();
+        assert_eq!(third.employee_code, "U03");
+    }
+
+    #[test]
+    fn refuses_more_than_sixty_two_permanent_accounts() {
+        let mut db = db();
+        for n in 1..=MAX_USER_ACCOUNTS {
+            create(&mut db, input(n)).unwrap();
+        }
+        let err = create(&mut db, input(63)).unwrap_err();
+        assert!(err.contains("62"));
     }
 }
