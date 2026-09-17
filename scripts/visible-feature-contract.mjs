@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 const read=(p)=>readFileSync(p,'utf8');
-const files={app:read('src/App.tsx'),settings:read('src/SettingsHub.tsx'),patients:read('src/PatientsPage.tsx'),appointments:read('src/AppointmentsPage.tsx'),dashboard:read('src/Dashboard.tsx'),readonly:read('src/ReadOnlyAppointmentsPage.tsx'),presentation:read('src/appointmentPresentation.ts'),print:read('src/safePrint.ts'),api:read('src/api.ts'),rust:read('src-tauri/src/appointments.rs'),lib:read('src-tauri/src/lib.rs')};
+const files={welcome:read('src/WelcomeScreen.tsx'),auth:read('src/AuthGate.tsx'),users:read('src/UsersPage.tsx'),app:read('src/App.tsx'),settings:read('src/SettingsHub.tsx'),patients:read('src/PatientsPage.tsx'),appointments:read('src/AppointmentsPage.tsx'),dashboard:read('src/Dashboard.tsx'),readonly:read('src/ReadOnlyAppointmentsPage.tsx'),presentation:read('src/appointmentPresentation.ts'),print:read('src/safePrint.ts'),api:read('src/api.ts'),rust:read('src-tauri/src/appointments.rs'),lib:read('src-tauri/src/lib.rs')};
 const checks=[
+['welcome is visible before authentication',files.app.includes('<WelcomeScreen onContinue={()=>setWelcomed(true)}/>')&&files.welcome.includes('مرحبًا بك في ClinicDesk')],
+['welcome shows free edition and 5.1.0',files.welcome.includes('النسخة المجانية')&&files.welcome.includes('الإصدار 5.1.0')],
+['password UI enforces exactly four newly chosen characters',files.auth.includes('length !== 4')&&files.auth.includes('maxLength={4}')&&files.users.includes('length !== 4')&&files.users.includes('maxLength={4}')],
 ['settings exposes users',files.settings.includes('المستخدمون والصلاحيات')&&files.settings.includes('<UsersPage')],
 ['settings exposes audit',files.settings.includes('سجل العمليات')&&files.settings.includes('<AuditPage')],
 ['free edition visible',files.app.includes('النسخة المجانية')&&files.settings.includes('النسخة المجانية')],

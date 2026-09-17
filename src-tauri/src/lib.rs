@@ -29,7 +29,7 @@ use tauri::Manager;
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 pub struct Db(pub Mutex<Connection>);
-const LATEST_SCHEMA_VERSION: i64 = 17;
+const LATEST_SCHEMA_VERSION: i64 = 18;
 fn schema_version(db: &Connection) -> Result<i64, String> {
     db.query_row(
         "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
@@ -100,6 +100,10 @@ fn migrate_db(db: &Connection) -> Result<(), String> {
         (
             17,
             include_str!("../migrations/017_provider_unavailability.sql"),
+        ),
+        (
+            18,
+            include_str!("../migrations/018_exact_four_password_policy.sql"),
         ),
     ] {
         if schema_version(db)? < version {

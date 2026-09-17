@@ -8,6 +8,7 @@ import { ReadOnlyAppointmentsPage } from './ReadOnlyAppointmentsPage';
 import { AuthGate } from './AuthGate';
 import { ProviderUnavailabilityPage } from './ProviderUnavailabilityPage';
 import { SettingsHub } from './SettingsHub';
+import { WelcomeScreen } from './WelcomeScreen';
 import { api, AuthSession, setActorToken } from './api';
 
 type Page='dashboard'|'patients'|'appointments'|'provider-unavailability'|'directory'|'settings';
@@ -16,6 +17,7 @@ type AppointmentAction={kind:'add';token:number}|null;
 
 export function App(){
   const [session,setSession]=useState<AuthSession|null>(null);
+  const [welcomed,setWelcomed]=useState(false);
   const [page,setPage]=useState<Page>('dashboard');
   const [patientFileNo,setPatientFileNo]=useState<number|null>(null);
   const [patientAction,setPatientAction]=useState<PatientAction>(null);
@@ -53,6 +55,7 @@ export function App(){
     try{await api.logout(session.token)}finally{sessionStorage.removeItem('clinicdesk.session');setActorToken(null);setSession(null);setPage('dashboard')}
   }
 
+  if(!welcomed)return <WelcomeScreen onContinue={()=>setWelcomed(true)}/>;
   if(!session)return <AuthGate onAuthenticated={setSession}/>;
 
   return <div className="app" dir="rtl">

@@ -7,8 +7,8 @@ mod users {
 mod auth;
 
 #[test]
-fn auth_gate_exports_expected_role_and_session_contract() {
-    assert!(auth::hash_password("GateCredential1")
-        .unwrap()
-        .starts_with("$argon2"));
+fn exact_four_password_policy_keeps_argon2_hashing() {
+    assert!(auth::hash_password("abc").is_err());
+    assert!(auth::hash_password("abcde").is_err());
+    assert!(auth::hash_password("A1!z").unwrap().starts_with("$argon2"));
 }

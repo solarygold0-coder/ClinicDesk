@@ -78,7 +78,7 @@ export function AuthGate({ onAuthenticated }: { onAuthenticated: (session: AuthS
     try {
       if (mode === 'changePassword') {
         if (!pendingSession) throw new Error('جلسة تغيير كلمة المرور غير متاحة؛ سجل الدخول مجددًا');
-        if (newPassword.length < 4) throw new Error('كلمة المرور الجديدة يجب ألا تقل عن 4 خانات');
+        if ([...newPassword].length !== 4) throw new Error('كلمة المرور الجديدة يجب أن تتكون من 4 خانات بالضبط');
         if (newPassword !== confirmPassword) throw new Error('تأكيد كلمة المرور الجديدة غير مطابق');
         const user = await api.changePassword(pendingSession.token, password, newPassword);
         finish({ ...pendingSession, user });
@@ -86,7 +86,7 @@ export function AuthGate({ onAuthenticated }: { onAuthenticated: (session: AuthS
       }
       if (mode === 'setup') {
         if (displayName.trim().length < 2) throw new Error('اسم المدير مطلوب');
-        if (password.length < 4) throw new Error('كلمة المرور الأولى يجب ألا تقل عن 4 خانات');
+        if ([...password].length !== 4) throw new Error('كلمة المرور الأولى يجب أن تتكون من 4 خانات بالضبط');
         if (password !== confirmPassword) throw new Error('تأكيد كلمة المرور غير مطابق');
         await api.createUser(username.trim(), displayName.trim(), password, 'general_manager');
       }
@@ -113,13 +113,13 @@ export function AuthGate({ onAuthenticated }: { onAuthenticated: (session: AuthS
         {error && <div className="notice errorText" role="alert">{error}</div>}
         {changing ? <>
           <label>كلمة المرور المؤقتة<span>*</span><input required dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
-          <label>كلمة المرور الجديدة<span>*</span><input autoFocus required dir="ltr" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" /></label>
-          <label>تأكيد كلمة المرور الجديدة<span>*</span><input required dir="ltr" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" /></label>
+          <label>كلمة المرور الجديدة<span>*</span><input autoFocus required minLength={4} maxLength={4} dir="ltr" type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" /></label>
+          <label>تأكيد كلمة المرور الجديدة<span>*</span><input required minLength={4} maxLength={4} dir="ltr" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" /></label>
         </> : <>
           {mode === 'setup' && <label>اسم الموظف<span>*</span><input autoFocus required value={displayName} onChange={(e) => setDisplayName(e.target.value)} autoComplete="name" /></label>}
           <label>اسم المستخدم<span>*</span><input autoFocus={mode === 'login'} required dir="ltr" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" /></label>
-          <label>كلمة المرور<span>*</span><input required dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'setup' ? 'new-password' : 'current-password'} /></label>
-          {mode === 'setup' && <label>تأكيد كلمة المرور<span>*</span><input required dir="ltr" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" /></label>}
+          <label>كلمة المرور<span>*</span><input required minLength={mode === 'setup' ? 4 : undefined} maxLength={mode === 'setup' ? 4 : undefined} dir="ltr" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete={mode === 'setup' ? 'new-password' : 'current-password'} /></label>
+          {mode === 'setup' && <label>تأكيد كلمة المرور<span>*</span><input required minLength={4} maxLength={4} dir="ltr" type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" /></label>}
         </>}
         <button className="primary" type="submit" disabled={busy}>{busy ? 'جارٍ التحقق…' : changing ? 'حفظ كلمة المرور والدخول' : mode === 'setup' ? 'إنشاء المدير وبدء النظام' : 'دخول'}</button>
         {mode === 'setup' && <small>الحساب الأول يُنشأ كمدير عام فقط، ولا يمكن إنشاء حساب أول بصلاحيات أقل.</small>}

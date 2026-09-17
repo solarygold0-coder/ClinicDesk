@@ -40,7 +40,7 @@ export function UsersPage({ currentUser, onLifecycle }: { currentUser: UserSumma
     if (busy) return;
     setBusy(true); setError(''); setOk('');
     try {
-      if (form.password.length < 4) throw new Error('كلمة المرور يجب ألا تقل عن 4 خانات');
+      if ([...form.password].length !== 4) throw new Error('كلمة المرور يجب أن تتكون من 4 خانات بالضبط');
       await api.createUser(form.username.trim(), form.displayName.trim(), form.password, form.roleType);
       setForm(blank);
       await load();
@@ -64,7 +64,7 @@ export function UsersPage({ currentUser, onLifecycle }: { currentUser: UserSumma
     if (busy) return;
     const password = window.prompt(`كلمة المرور الجديدة للمستخدم ${user.displayName}`, '') || '';
     if (!password) return;
-    if (password.length < 4) { setError('كلمة المرور يجب ألا تقل عن 4 خانات'); return; }
+    if ([...password].length !== 4) { setError('كلمة المرور يجب أن تتكون من 4 خانات بالضبط'); return; }
     setBusy(true); setError(''); setOk('');
     try {
       await api.resetUserPassword(user.id, password);
@@ -104,7 +104,7 @@ export function UsersPage({ currentUser, onLifecycle }: { currentUser: UserSumma
           <div className="formGrid">
             <label>اسم الموظف<span>*</span><input required disabled={busy} value={form.displayName} onChange={(e) => setForm({ ...form, displayName: e.target.value })} /></label>
             <label>اسم المستخدم<span>*</span><input required disabled={busy} dir="ltr" value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} /></label>
-            <label>كلمة المرور<span>*</span><input required disabled={busy} dir="ltr" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
+            <label>كلمة المرور<span>*</span><input required minLength={4} maxLength={4} disabled={busy} dir="ltr" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></label>
             <label>الدور<select disabled={busy} value={form.roleType} onChange={(e) => setForm({ ...form, roleType: e.target.value as RoleType })}>{(Object.keys(roleLabels) as RoleType[]).map((r) => <option key={r} value={r}>{roleLabels[r]}</option>)}</select></label>
           </div>
           <button className="primary" type="submit" disabled={busy}><UserPlus aria-hidden="true" />إضافة المستخدم</button>

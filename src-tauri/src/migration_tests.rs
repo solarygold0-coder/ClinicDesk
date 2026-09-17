@@ -183,7 +183,7 @@ fn role_capability_migration_seeds_roles_without_default_restore_grant() {
 fn provider_unavailability_schema_is_present() {
     let db = fresh();
     migrate_db(&db).unwrap();
-    assert_eq!(schema_version(&db).unwrap(), 17);
+    assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
     let mut stmt = db.prepare("PRAGMA table_info(appointments)").unwrap();
     let columns = stmt
         .query_map([], |r| r.get::<_, String>(1))
@@ -216,4 +216,19 @@ fn provider_unavailability_schema_is_present() {
         .unwrap();
     assert_eq!(events, 1);
     assert_eq!(actions, 1);
+}
+
+#[test]
+fn exact_four_password_policy_is_registered() {
+    let db = fresh();
+    migrate_db(&db).unwrap();
+    let policy: String = db
+        .query_row(
+            "SELECT value FROM app_meta WHERE key='password_policy'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(policy, "exact-4-v1");
+    assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
 }
