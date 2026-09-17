@@ -1,0 +1,41 @@
+name: Backup FK hardening
+on:
+  push:
+    branches: [tauri-react-rebuild]
+    paths: [.github/workflows/backup-fk-hardening.yml]
+permissions:
+  contents: write
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+      - name: Add foreign key verification and regression test
+        shell: python
+        run: |
+          from pathlib import Path
+          p=Path('src-tauri/src/backup.rs')
+          s=p.read_text()
+          old='''    if integrity != "ok" {\n        return Err("فشل فحص سلامة قاعدة البيانات".into());\n    }\n    let schema: i64 = db'''
+          new='''    if integrity != "ok" {\n        return Err("فشل فحص سلامة قاعدة البيانات".into());\n    }\n    let foreign_key_violation: Option<i64> = db\n        .query_row("PRAGMA foreign_key_check", [], |r| r.get(0))\n        .optional()\n        .map_err(|e| e.to_string())?;\n    if foreign_key_violation.is_some() {\n        return Err("فشل فحص العلاقات المرجعية في قاعدة البيانات".into());\n    }\n    let schema: i64 = db'''
+          if old not in s: raise SystemExit('verify anchor not found')
+          s=s.replace('use rusqlite::Connection;', 'use rusqlite::{Connection, OptionalExtension};', 1)
+          s=s.replace(old,new,1)
+          anchor='''    #[test]\n    fn rejects_wrong_schema_version() {'''
+          test='''    #[test]\n    fn rejects_database_with_broken_foreign_keys() {\n        let path = temp("broken-foreign-key");\n        let conn = Connection::open(&path).unwrap();\n        super::super::migrate_db(&conn).unwrap();\n        conn.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();\n        conn.execute(\n            "INSERT INTO appointments(patient_id,start_at,end_at,status) VALUES(999999,'2026-09-17T10:00:00','2026-09-17T10:30:00','scheduled')",\n            [],\n        )\n        .unwrap();\n        drop(conn);\n        let result = verify_database(&path, super::super::LATEST_SCHEMA_VERSION);\n        assert!(result.is_err());\n        let _ = fs::remove_file(path);\n    }\n\n'''
+          if anchor not in s: raise SystemExit('test anchor not found')
+          s=s.replace(anchor,test+anchor,1)
+          p.write_text(s)
+      - name: Format and test backup module
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          cargo test --manifest-path src-tauri/Cargo.toml backup::tests -- --nocapture
+      - name: Commit hardening
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src-tauri/src/backup.rs
+          git commit -m "Reject backups with broken foreign keys"
+          git push origin HEAD:tauri-react-rebuild
