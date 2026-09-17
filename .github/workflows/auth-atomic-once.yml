@@ -1,0 +1,57 @@
+name: Atomic auth creation one-shot
+on:
+  push:
+    branches: [tauri-react-rebuild]
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Apply atomic auth user creation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+      - name: Replace non-atomic auth creation
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('src-tauri/src/auth.rs')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('pub fn create_user(')
+          end = text.index('\npub fn update_user(', start)
+          replacement = '''pub fn create_user(
+              db: &mut Connection,
+              username: String,
+              display_name: String,
+              password: String,
+              role_type: String,
+          ) -> Result<UserSummary, String> {
+              let role = valid_role(role_type.trim())?.to_string();
+              let password_hash = hash_password(&password)?;
+              let created = users::create_with_role(
+                  db,
+                  users::NewUserAccount {
+                      username,
+                      display_name,
+                      password_hash,
+                      is_system_admin: Some(is_admin_role(&role)),
+                  },
+                  &role,
+              )?;
+              summary_by_id(db, created.id)
+          }
+          '''
+          path.write_text(text[:start] + replacement + text[end:], encoding='utf-8')
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
+      - name: Commit atomic auth creation
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src-tauri/src/auth.rs src-tauri/src/users.rs
+          git diff --cached --quiet && exit 0
+          git commit -m 'Make auth user creation atomic'
+          git push origin HEAD:tauri-react-rebuild
