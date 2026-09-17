@@ -1,0 +1,111 @@
+name: Repair provider record action
+
+on:
+  push:
+    branches: [tauri-react-rebuild]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repair-provider-record-action
+  cancel-in-progress: true
+
+jobs:
+  repair:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Replace record_action with canonical implementation
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('src-tauri/src/provider_unavailability.rs')
+          s = path.read_text(encoding='utf-8')
+          start = s.index('fn record_action(\n')
+          end = s.index('\nfn transfer(', start)
+          function = r'''fn record_action(
+              c: &Connection,
+              event: &ProviderUnavailabilityEvent,
+              before: &AppointmentSnapshot,
+              after: &AppointmentSnapshot,
+              details: ActionRecordDetails<'_>,
+          ) -> Result<(), String> {
+              let ActionRecordDetails {
+                  action_type,
+                  replacement_doctor_id,
+                  new_starts_at,
+                  replacement_appointment_id,
+              } = details;
+              c.execute(
+                  "INSERT INTO provider_unavailability_actions(
+                      event_id,appointment_id,action_type,original_doctor_id,replacement_doctor_id,
+                      original_starts_at,new_starts_at,replacement_appointment_id,reason_code,reason_note
+                   ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+                  params![
+                      event.id,
+                      before.id,
+                      action_type,
+                      before.doctor_id,
+                      replacement_doctor_id,
+                      before.starts_at,
+                      new_starts_at,
+                      replacement_appointment_id,
+                      event.reason_code,
+                      event.reason_note,
+                  ],
+              )
+              .map_err(|e| e.to_string())?;
+              let before_json = snapshot_json(before);
+              let after_json = snapshot_json(after);
+              let audit_details = serde_json::json!({
+                  "eventId": event.id,
+                  "action": action_type,
+                  "originalDoctorId": before.doctor_id,
+                  "replacementDoctorId": replacement_doctor_id,
+                  "oldStartsAt": before.starts_at,
+                  "newStartsAt": new_starts_at,
+                  "replacementAppointmentId": replacement_appointment_id,
+              })
+              .to_string();
+              let reason = event.reason_note.as_deref().unwrap_or(&event.reason_code);
+              audit::record_as(
+                  c,
+                  &format!("provider_unavailability_{action_type}"),
+                  "appointment",
+                  Some(before.id),
+                  Some(&audit_details),
+                  &audit::AuditActor::default(),
+                  &audit::AuditChange {
+                      before_json: Some(&before_json),
+                      after_json: Some(&after_json),
+                      reason: Some(reason),
+                  },
+              )
+          }
+          '''
+          s = s[:start] + function + s[end:]
+          path.write_text(s, encoding='utf-8')
+      - name: Format and verify targeted source
+        run: |
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          grep -q "event_id,appointment_id,action_type,original_doctor_id,replacement_doctor_id" src-tauri/src/provider_unavailability.rs
+          if grep -q "event_id,appointment_id,details.action_type" src-tauri/src/provider_unavailability.rs; then exit 1; fi
+      - name: Remove one-time workflow
+        run: git rm .github/workflows/repair-provider-record-action.yml
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/src/provider_unavailability.rs
+          git diff --cached --check
+          git commit -m "Repair provider action audit recording"
+          git push origin HEAD:tauri-react-rebuild
