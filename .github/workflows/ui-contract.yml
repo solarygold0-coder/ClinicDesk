@@ -26,3 +26,5 @@ jobs:
         run: node scripts/ui-contract.mjs
       - name: Verify Arabic lifecycle audit labels
         run: node scripts/audit-label-contract.mjs
+      - name: Verify smart appointment scheduling advisories
+        run: node scripts/appointment-advisory-contract.mjs
