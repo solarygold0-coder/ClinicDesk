@@ -124,6 +124,26 @@ console.log(`Full Gregorian date display contract passed: ${checks.length}/${che
 '''
 )
 
+p = Path("scripts/ui-contract.mjs")
+s = p.read_text()
+if "dateDisplay: read('src/dateDisplay.ts')" not in s:
+    s = s.replace(
+        "  api: read('src/api.ts'),\n",
+        "  api: read('src/api.ts'),\n  dateDisplay: read('src/dateDisplay.ts'),\n",
+    )
+replacements = {
+    "['patient display explicitly uses Gregorian calendar', files.patients.includes('ar-SA-u-ca-gregory')],": "['patient display explicitly uses Gregorian calendar', files.patients.includes('ar-SA-u-ca-gregory') || (files.patients.includes(\"from './dateDisplay'\") && files.dateDisplay.includes('ar-SA-u-ca-gregory'))],",
+    "['appointment display explicitly uses Gregorian calendar', files.appointments.includes('ar-SA-u-ca-gregory')],": "['appointment display explicitly uses Gregorian calendar', files.appointments.includes('ar-SA-u-ca-gregory') || (files.appointments.includes(\"from './dateDisplay'\") && files.dateDisplay.includes('ar-SA-u-ca-gregory'))],",
+    "['dashboard display explicitly uses Gregorian calendar', files.dashboard.includes('ar-SA-u-ca-gregory')],": "['dashboard display explicitly uses Gregorian calendar', files.dashboard.includes('ar-SA-u-ca-gregory') || (files.dashboard.includes(\"from './dateDisplay'\") && files.dateDisplay.includes('ar-SA-u-ca-gregory'))],",
+    "['settings display explicitly uses Gregorian calendar', files.scheduling.includes('ar-SA-u-ca-gregory')],": "['settings display explicitly uses Gregorian calendar', files.scheduling.includes('ar-SA-u-ca-gregory') || (files.scheduling.includes(\"from './dateDisplay'\") && files.dateDisplay.includes('ar-SA-u-ca-gregory'))],",
+}
+for old, new in replacements.items():
+    if old in s:
+        s = s.replace(old, new)
+    elif new not in s:
+        raise SystemExit(f"missing RTL Gregorian contract pattern: {old}")
+p.write_text(s)
+
 p = Path(".github/workflows/ui-contract.yml")
 s = p.read_text()
 marker = "      - name: Verify silent two-day appointment reminder\n        run: node scripts/two-day-reminder-contract.mjs\n"
