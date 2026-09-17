@@ -11,7 +11,7 @@ const eventLabels: Record<string, string> = {
   provider_unavailability_cancel: 'إلغاء بسبب تعذّر المعالج',
   provider_unavailability_replacement_created: 'إنشاء موعد بديل بسبب تعذّر المعالج',
   user_created: 'إنشاء مستخدم', user_updated: 'تعديل مستخدم', user_status_changed: 'تغيير حالة مستخدم',
-  user_password_reset: 'إعادة تعيين كلمة المرور', system_bootstrap: 'تهيئة النظام',
+  user_password_reset: 'إعادة تعيين كلمة المرور', user_password_changed: 'تغيير كلمة المرور', system_bootstrap: 'تهيئة النظام',
   attachment_added: 'إضافة مرفق', attachment_archived: 'أرشفة مرفق', attachment_restored: 'استعادة مرفق',
   backup_created: 'إنشاء نسخة احتياطية', restore_started: 'بدء استعادة', restore_completed: 'اكتمال استعادة',
   deputy_restore_permission_changed: 'تعديل صلاحية الاستعادة', clinic_created: 'إضافة عيادة', clinic_updated: 'تعديل عيادة',
@@ -21,6 +21,12 @@ const eventLabels: Record<string, string> = {
 const entityLabels: Record<string, string> = {
   patient:'مريض', appointment:'موعد', user:'مستخدم', database:'قاعدة البيانات', clinic:'عيادة', doctor:'طبيب',
   attachment:'مرفق', scheduling:'الإعدادات', closure:'يوم إغلاق', security:'الأمان', provider_unavailability:'تعذّر معالج'
+};
+const formatAuditDate = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const text = date.toLocaleString('ar-SA-u-ca-gregory',{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'});
+  return `${text} • الشهر ${String(date.getMonth() + 1).padStart(2, '0')}`;
 };
 
 export function AuditPage({ initialEmployeeCode = '' }: { initialEmployeeCode?: string }) {
@@ -42,7 +48,7 @@ export function AuditPage({ initialEmployeeCode = '' }: { initialEmployeeCode?: 
     <div className="searchbar"><Search aria-hidden="true" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="ابحث باسم الموظف، Uxx، نوع العملية أو رقم الكيان" /></div>
     <div className="tableCard">
       {filtered.length === 0 ? <div className="empty"><FileClock aria-hidden="true" /><h3>لا توجد عمليات مطابقة</h3><p>ستظهر إجراءات الموظفين هنا فور تسجيلها.</p></div> : <table><thead><tr><th>التاريخ والوقت</th><th>الموظف</th><th>العملية</th><th>الكيان</th><th>السبب/التفاصيل</th></tr></thead><tbody>{filtered.map((row) => <tr key={row.id}>
-        <td>{new Date(row.createdAt).toLocaleString('ar-SA-u-ca-gregory',{weekday:'long',year:'numeric',month:'long',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+        <td>{formatAuditDate(row.createdAt)}</td>
         <td>{row.actorDisplayName || 'نظام/قديم'}{row.actorEmployeeCode ? <small className="block"><bdi>{row.actorEmployeeCode}</bdi></small> : null}</td>
         <td>{eventLabels[row.eventType] || row.eventType}</td>
         <td>{entityLabels[row.entityType] || row.entityType}{row.entityId != null ? <> • <bdi>#{row.entityId}</bdi></> : null}</td>
