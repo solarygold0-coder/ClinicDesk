@@ -1,0 +1,26 @@
+name: RTL UI Contract
+
+on:
+  push:
+    branches: [main, tauri-react-rebuild]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: clinicdesk-ui-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  rtl-ui-contract:
+    name: RTL / UI contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify approved RTL/UI invariants
+        run: node scripts/ui-contract.mjs
