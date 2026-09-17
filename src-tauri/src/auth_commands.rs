@@ -14,10 +14,9 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let guard = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let guard =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&guard)
 }
 
@@ -28,10 +27,7 @@ fn authorize_user_management(
     authorization::authorize(conn, actor_token, authorization::USER_MANAGE)
 }
 
-fn audit_actor<'a>(
-    user: &'a auth::UserSummary,
-    token: Option<&'a str>,
-) -> audit::AuditActor<'a> {
+fn audit_actor<'a>(user: &'a auth::UserSummary, token: Option<&'a str>) -> audit::AuditActor<'a> {
     audit::AuditActor {
         user_id: Some(user.id),
         display_name: Some(&user.display_name),
@@ -41,7 +37,9 @@ fn audit_actor<'a>(
 }
 
 fn user_by_id(conn: &rusqlite::Connection, id: i64) -> Result<Option<auth::UserSummary>, String> {
-    Ok(auth::list_users(conn)?.into_iter().find(|user| user.id == id))
+    Ok(auth::list_users(conn)?
+        .into_iter()
+        .find(|user| user.id == id))
 }
 
 #[tauri::command]
@@ -72,10 +70,9 @@ pub fn auth_bootstrap(
     display_name: String,
     password: String,
 ) -> Result<auth::AuthSession, String> {
-    let mut guard = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut guard =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     let count: i64 = guard
         .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
@@ -135,10 +132,9 @@ pub fn user_create(
     password: String,
     role_type: String,
 ) -> Result<auth::UserSummary, String> {
-    let mut guard = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut guard =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     let actor = authorize_user_management(&guard, actor_token.as_deref())?
         .ok_or_else(|| "تسجيل الدخول مطلوب لإدارة المستخدمين".to_string())?;
     let user = auth::create_user(&mut guard, username, display_name, password, role_type)?;
@@ -171,8 +167,7 @@ pub fn user_update(
     with_db(&db, |conn| {
         let actor = authorize_user_management(conn, actor_token.as_deref())?
             .ok_or_else(|| "تسجيل الدخول مطلوب لإدارة المستخدمين".to_string())?;
-        let before = user_by_id(conn, id)?
-            .ok_or_else(|| "المستخدم غير موجود".to_string())?;
+        let before = user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود".to_string())?;
         let updated = auth::update_user(conn, id, username, display_name, role_type)?;
         let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
         let after_json = serde_json::to_string(&updated).map_err(|e| e.to_string())?;
@@ -207,11 +202,10 @@ pub fn user_set_status(
         if actor.id == id && status.trim() != "ACTIVE" {
             return Err("لا يمكن للمستخدم تعطيل حسابه الحالي".into());
         }
-        let before = user_by_id(conn, id)?
-            .ok_or_else(|| "المستخدم غير موجود".to_string())?;
+        let before = user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود".to_string())?;
         auth::set_status(conn, id, status.clone(), reason.clone())?;
-        let after = user_by_id(conn, id)?
-            .ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
+        let after =
+            user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
         let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
         let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
         audit::record_as(
@@ -274,12 +268,9 @@ pub fn deputy_restore_permission_set(
     enabled: bool,
 ) -> Result<(), String> {
     with_db(&db, |conn| {
-        let actor = authorization::authorize(
-            conn,
-            actor_token.as_deref(),
-            authorization::SECURITY_MANAGE,
-        )?
-        .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
+        let actor =
+            authorization::authorize(conn, actor_token.as_deref(), authorization::SECURITY_MANAGE)?
+                .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
         authorization::set_deputy_restore_grant(conn, actor_token.as_deref(), enabled)?;
         audit::record_as(
             conn,
