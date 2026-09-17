@@ -1,6 +1,17 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { CalendarPlus, Clock3, Pencil, Printer, UserRound, X } from 'lucide-react';
-import { api, Appointment, AppointmentInput, Clinic, Doctor, Patient, VisitTrackingInput } from './api';
+import { AlertTriangle, CalendarPlus, Clock3, Pencil, Printer, UserRound, X } from 'lucide-react';
+import {
+  api,
+  Appointment,
+  AppointmentInput,
+  Clinic,
+  ClosureDate,
+  Doctor,
+  Patient,
+  SchedulingSettings,
+  VisitTrackingInput,
+} from './api';
+import { getSaudiScheduleAdvisories } from './saudiScheduleAdvisory';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const day = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -38,6 +49,8 @@ export function AppointmentsPage({
   const [rows, setRows] = useState<Appointment[]>([]);
   const [clinics, setClinics] = useState<Clinic[]>([]);
   const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [schedule, setSchedule] = useState<SchedulingSettings | null>(null);
+  const [closures, setClosures] = useState<ClosureDate[]>([]);
   const [defaultDuration, setDefaultDuration] = useState(30);
   const [date, setDate] = useState(day());
   const [open, setOpen] = useState(false);
@@ -54,6 +67,11 @@ export function AppointmentsPage({
     () => form.clinicId ? doctors.filter((d) => !d.clinicId || d.clinicId === form.clinicId) : doctors,
     [doctors, form.clinicId],
   );
+  const scheduleAdvisories = useMemo(
+    () => getSaudiScheduleAdvisories(form, schedule, closures),
+    [form.startsAt, form.durationMinutes, schedule, closures],
+  );
+  const hasBlockingAdvisory = scheduleAdvisories.some((item) => item.severity === 'block');
 
   const setStartPart = (index: number, value: number) => {
     const p = parts(form.startsAt);
@@ -65,24 +83,29 @@ export function AppointmentsPage({
     const mi = clamp(p[4], 0, 59);
     setForm({ ...form, startsAt: `${y}-${pad(m)}-${pad(d)}T${pad(h)}:${pad(mi)}` });
   };
+
   async function load(d = date) {
     try {
       const [from, to] = [`${d}T00:00:00`, `${d}T23:59:59`];
-      const [a, c, dr, s] = await Promise.all([
+      const [a, c, dr, s, closedDays] = await Promise.all([
         api.appointments(from, to),
         api.clinics(),
         api.doctors(),
         api.schedulingSettings(),
+        api.closures(),
       ]);
       setRows(a);
       setClinics(c.filter((x) => x.isActive !== false));
       setDoctors(dr.filter((x) => x.isActive !== false));
+      setSchedule(s);
+      setClosures(closedDays);
       setDefaultDuration(s.slotMinutes);
       setError('');
     } catch (e) {
       setError(String(e));
     }
   }
+
   useEffect(() => { void load(date); }, [date]);
   useEffect(() => { if (action?.kind === 'add') add(); }, [action?.token]);
   useEffect(() => {
@@ -109,6 +132,7 @@ export function AppointmentsPage({
       setLookup(String(e));
     }
   }
+
   function add() {
     setEditing(null);
     setForm(blank(defaultDuration));
@@ -119,6 +143,7 @@ export function AppointmentsPage({
     setError('');
     setOpen(true);
   }
+
   async function edit(a: Appointment) {
     if (busy || statusBusyId !== null) return;
     setEditing(a.id);
@@ -143,6 +168,7 @@ export function AppointmentsPage({
       setError(`تعذر تحميل بيانات الزيارة الحالية: ${String(e)}`);
     }
   }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (busy) return;
@@ -152,6 +178,10 @@ export function AppointmentsPage({
     }
     if (!patient || patient.fileNo !== form.patientFileNo) {
       setError('تحقق من رقم ملف المريض قبل حفظ الموعد');
+      return;
+    }
+    if (hasBlockingAdvisory) {
+      setError('لا يمكن حفظ الموعد قبل معالجة تنبيهات الجدولة المانعة الظاهرة أعلاه.');
       return;
     }
     setBusy(true);
@@ -174,6 +204,7 @@ export function AppointmentsPage({
       setBusy(false);
     }
   }
+
   async function updateStatus(id: number, nextStatus: string) {
     if (statusBusyId !== null) return;
     setStatusBusyId(id);
@@ -236,6 +267,7 @@ export function AppointmentsPage({
               <label>رقم ملف المريض<span>*</span><input autoFocus required min="1" type="number" inputMode="numeric" dir="ltr" value={form.patientFileNo || ''} onChange={(e) => { const n = Number(e.target.value); setForm({ ...form, patientFileNo: n }); setPatient(null); setLookup(''); }} onBlur={() => void findPatient(form.patientFileNo)} /></label>
               <div className="patientPreview" aria-live="polite">{patient ? <><UserRound aria-hidden="true" /><div><strong>{patient.fullName}</strong><small>ملف رقم <bdi>{patient.fileNo}</bdi>{patient.phone ? <> • <bdi>{patient.phone}</bdi></> : ''}</small></div></> : lookup ? <span className="errorText">{lookup}</span> : <span>أدخل رقم الملف ثم انتقل للحقل التالي للتحقق.</span>}</div>
               <label className="full">التاريخ والوقت<span>*</span><div className="dateTimeSpinners" dir="ltr" role="group" aria-label="تاريخ ووقت الموعد"><input aria-label="السنة" title="السنة" type="number" min="1950" max="2050" value={y} onChange={(e) => setStartPart(0, Number(e.target.value))} /><input aria-label="الشهر" title="الشهر" type="number" min="1" max="12" value={mo} onChange={(e) => setStartPart(1, Number(e.target.value))} /><input aria-label="اليوم" title="اليوم" type="number" min="1" max={maxDay} value={da} onChange={(e) => setStartPart(2, Number(e.target.value))} /><span>—</span><input aria-label="الساعة" title="الساعة" type="number" min="0" max="23" value={hr} onChange={(e) => setStartPart(3, Number(e.target.value))} /><span>:</span><input aria-label="الدقيقة" title="الدقيقة" type="number" min="0" max="59" step="5" value={mn} onChange={(e) => setStartPart(4, Number(e.target.value))} /></div><small>السنة / الشهر / اليوم — الساعة : الدقيقة. عدد أيام الشهر يُضبط تلقائيًا.</small></label>
+              {scheduleAdvisories.length > 0 && <div className="full scheduleAdvisories" aria-live="polite">{scheduleAdvisories.map((item) => <div key={item.code} className={item.severity === 'block' ? 'notice errorText' : 'notice'}><AlertTriangle aria-hidden="true" /><span><strong>{item.severity === 'block' ? 'تنبيه مانع للحجز: ' : 'تنبيه تشغيلي: '}</strong>{item.message}</span></div>)}</div>}
               <label>العيادة<select value={form.clinicId || ''} onChange={(e) => setForm({ ...form, clinicId: e.target.value ? Number(e.target.value) : undefined, doctorId: undefined })}><option value="">بدون تحديد</option>{clinics.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
               <label>الطبيب<select value={form.doctorId || ''} onChange={(e) => setForm({ ...form, doctorId: e.target.value ? Number(e.target.value) : undefined })}><option value="">بدون تحديد</option>{filteredDoctors.map((d) => <option key={d.id} value={d.id}>{d.name}{d.specialty ? ` — ${d.specialty}` : ''}</option>)}</select></label>
               <label>مدة الموعد<select value={form.durationMinutes} onChange={(e) => setForm({ ...form, durationMinutes: Number(e.target.value) })}>{[10, 15, 20, 30, 60].map((n) => <option key={n} value={n}>{n} دقيقة</option>)}</select></label>
@@ -245,7 +277,7 @@ export function AppointmentsPage({
               <label className="full">ملاحظات<textarea value={form.notes || ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
             </div>
             {error && <div className="error modalError" role="alert">{error}</div>}
-            <div className="modalActions"><button type="button" disabled={busy} onClick={() => setOpen(false)}>إلغاء</button><button className="primary" disabled={busy || !patient || (editing !== null && !visitReady)}>{busy ? 'جارٍ الحفظ…' : editing !== null && !visitReady ? 'بانتظار بيانات الزيارة…' : editing !== null ? 'حفظ التعديلات' : 'حفظ الموعد'}</button></div>
+            <div className="modalActions"><button type="button" disabled={busy} onClick={() => setOpen(false)}>إلغاء</button><button className="primary" disabled={busy || !patient || hasBlockingAdvisory || (editing !== null && !visitReady)}>{busy ? 'جارٍ الحفظ…' : hasBlockingAdvisory ? 'عالج تنبيهات الحجز أولًا' : editing !== null && !visitReady ? 'بانتظار بيانات الزيارة…' : editing !== null ? 'حفظ التعديلات' : 'حفظ الموعد'}</button></div>
           </form>
         </div>
       )}
