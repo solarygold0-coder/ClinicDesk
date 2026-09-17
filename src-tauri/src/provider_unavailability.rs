@@ -88,7 +88,9 @@ fn normalized_datetime(value: &str) -> Result<String, String> {
 }
 
 fn clean_note(value: Option<String>) -> Option<String> {
-    value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
 }
 
 fn validate_reason(code: &str, note: Option<String>) -> Result<(String, Option<String>), String> {
@@ -175,7 +177,11 @@ fn parse_time(value: &str) -> Result<NaiveTime, String> {
     NaiveTime::parse_from_str(value, "%H:%M").map_err(|_| "إعداد وقت الدوام غير صالح".into())
 }
 
-fn validate_work_window(c: &Connection, start: NaiveDateTime, end: NaiveDateTime) -> Result<(), String> {
+fn validate_work_window(
+    c: &Connection,
+    start: NaiveDateTime,
+    end: NaiveDateTime,
+) -> Result<(), String> {
     if matches!(start.weekday(), Weekday::Fri | Weekday::Sat) {
         return Err("لا يمكن جدولة الموعد يوم الجمعة أو السبت".into());
     }
@@ -190,7 +196,12 @@ fn validate_work_window(c: &Connection, start: NaiveDateTime, end: NaiveDateTime
     if closed.is_some() {
         return Err("اليوم المحدد إجازة أو يوم إغلاق ولا يقبل مواعيد".into());
     }
-    let (work_start, work_end, break_start, break_end): (String, String, Option<String>, Option<String>) = c
+    let (work_start, work_end, break_start, break_end): (
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    ) = c
         .query_row(
             "SELECT work_start,work_end,break_start,break_end FROM scheduling_settings WHERE id=1",
             [],
@@ -200,7 +211,9 @@ fn validate_work_window(c: &Connection, start: NaiveDateTime, end: NaiveDateTime
     let ws = parse_time(&work_start)?;
     let we = parse_time(&work_end)?;
     if start.time() < ws || end.time() > we {
-        return Err(format!("الموعد خارج ساعات الدوام من {work_start} إلى {work_end}"));
+        return Err(format!(
+            "الموعد خارج ساعات الدوام من {work_start} إلى {work_end}"
+        ));
     }
     if let (Some(bs), Some(be)) = (break_start, break_end) {
         let bs = parse_time(&bs)?;
@@ -239,7 +252,10 @@ fn ensure_capacity(
     }
 }
 
-fn ensure_event_appointment(event: &ProviderUnavailabilityEvent, appointment: &AppointmentSnapshot) -> Result<(), String> {
+fn ensure_event_appointment(
+    event: &ProviderUnavailabilityEvent,
+    appointment: &AppointmentSnapshot,
+) -> Result<(), String> {
     if appointment.doctor_id != Some(event.doctor_id)
         || appointment.starts_at >= event.unavailable_to
         || appointment.ends_at <= event.unavailable_from
@@ -252,7 +268,10 @@ fn ensure_event_appointment(event: &ProviderUnavailabilityEvent, appointment: &A
     Ok(())
 }
 
-pub fn create_event(c: &Connection, input: ProviderUnavailabilityInput) -> Result<ProviderUnavailabilityEvent, String> {
+pub fn create_event(
+    c: &Connection,
+    input: ProviderUnavailabilityInput,
+) -> Result<ProviderUnavailabilityEvent, String> {
     let doctor_exists: i64 = c
         .query_row(
             "SELECT COUNT(*) FROM doctors WHERE id=?1 AND is_active=1",
@@ -305,7 +324,10 @@ pub fn create_event(c: &Connection, input: ProviderUnavailabilityInput) -> Resul
     Ok(event)
 }
 
-pub fn affected_appointments(c: &Connection, event_id: i64) -> Result<Vec<AffectedAppointment>, String> {
+pub fn affected_appointments(
+    c: &Connection,
+    event_id: i64,
+) -> Result<Vec<AffectedAppointment>, String> {
     let event = event_by_id(c, event_id)?;
     let sql = format!(
         "SELECT a.id,a.patient_id,p.file_no,p.full_name,a.clinic_id,a.doctor_id,a.starts_at,a.ends_at,a.status
@@ -316,21 +338,29 @@ pub fn affected_appointments(c: &Connection, event_id: i64) -> Result<Vec<Affect
     );
     let mut stmt = c.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![event.doctor_id, event.unavailable_to, event.unavailable_from], |r| {
-            Ok(AffectedAppointment {
-                appointment_id: r.get(0)?,
-                patient_id: r.get(1)?,
-                file_no: r.get(2)?,
-                patient_name: r.get(3)?,
-                clinic_id: r.get(4)?,
-                doctor_id: r.get(5)?,
-                starts_at: r.get(6)?,
-                ends_at: r.get(7)?,
-                status: r.get(8)?,
-            })
-        })
+        .query_map(
+            params![
+                event.doctor_id,
+                event.unavailable_to,
+                event.unavailable_from
+            ],
+            |r| {
+                Ok(AffectedAppointment {
+                    appointment_id: r.get(0)?,
+                    patient_id: r.get(1)?,
+                    file_no: r.get(2)?,
+                    patient_name: r.get(3)?,
+                    clinic_id: r.get(4)?,
+                    doctor_id: r.get(5)?,
+                    starts_at: r.get(6)?,
+                    ends_at: r.get(7)?,
+                    status: r.get(8)?,
+                })
+            },
+        )
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 fn record_action(
@@ -405,7 +435,13 @@ fn transfer(
     let start = parse_datetime(&before.starts_at)?;
     let end = parse_datetime(&before.ends_at)?;
     validate_work_window(c, start, end)?;
-    ensure_capacity(c, replacement_doctor_id, &before.starts_at, &before.ends_at, Some(appointment_id))?;
+    ensure_capacity(
+        c,
+        replacement_doctor_id,
+        &before.starts_at,
+        &before.ends_at,
+        Some(appointment_id),
+    )?;
     let clinic_id = replacement_clinic.or(before.clinic_id);
     c.execute(
         "UPDATE appointments SET doctor_id=?2,clinic_id=?3,
@@ -416,10 +452,23 @@ fn transfer(
     )
     .map_err(|e| e.to_string())?;
     let after = appointment_snapshot(c, appointment_id)?;
-    record_action(c, event, &before, &after, "transfer", Some(replacement_doctor_id), Some(&after.starts_at), None)
+    record_action(
+        c,
+        event,
+        &before,
+        &after,
+        "transfer",
+        Some(replacement_doctor_id),
+        Some(&after.starts_at),
+        None,
+    )
 }
 
-fn cancel(c: &Connection, event: &ProviderUnavailabilityEvent, appointment_id: i64) -> Result<(), String> {
+fn cancel(
+    c: &Connection,
+    event: &ProviderUnavailabilityEvent,
+    appointment_id: i64,
+) -> Result<(), String> {
     let before = appointment_snapshot(c, appointment_id)?;
     ensure_event_appointment(event, &before)?;
     c.execute(
@@ -450,7 +499,9 @@ fn reschedule(
     let new_end = new_start + duration;
     validate_work_window(c, new_start, new_end)?;
 
-    let target_doctor = replacement_doctor_id.or(before.doctor_id).ok_or_else(|| "المعالج غير محدد".to_string())?;
+    let target_doctor = replacement_doctor_id
+        .or(before.doctor_id)
+        .ok_or_else(|| "المعالج غير محدد".to_string())?;
     let replacement_clinic = ensure_doctor(c, target_doctor)?;
     if target_doctor == event.doctor_id {
         let event_from = parse_datetime(&event.unavailable_from)?;
@@ -513,7 +564,9 @@ fn reschedule(
         "provider_unavailability_replacement_created",
         "appointment",
         Some(replacement_id),
-        Some(&serde_json::json!({"eventId":event.id,"originalAppointmentId":before.id}).to_string()),
+        Some(
+            &serde_json::json!({"eventId":event.id,"originalAppointmentId":before.id}).to_string(),
+        ),
         &audit::AuditActor::default(),
         &audit::AuditChange {
             before_json: None,
@@ -529,7 +582,11 @@ fn maybe_resolve_event(c: &Connection, event: &ProviderUnavailabilityEvent) -> R
             "SELECT COUNT(*) FROM appointments
              WHERE doctor_id=?1 AND status IN ('scheduled','arrived')
                AND starts_at<?2 AND ends_at>?3",
-            params![event.doctor_id, event.unavailable_to, event.unavailable_from],
+            params![
+                event.doctor_id,
+                event.unavailable_to,
+                event.unavailable_from
+            ],
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
@@ -543,7 +600,11 @@ fn maybe_resolve_event(c: &Connection, event: &ProviderUnavailabilityEvent) -> R
     Ok(())
 }
 
-pub fn resolve_many(c: &Connection, event_id: i64, resolutions: Vec<ResolutionInput>) -> Result<(), String> {
+pub fn resolve_many(
+    c: &Connection,
+    event_id: i64,
+    resolutions: Vec<ResolutionInput>,
+) -> Result<(), String> {
     if resolutions.is_empty() {
         return Err("اختر موعدًا واحدًا على الأقل لمعالجة تعذر المعالج".into());
     }
@@ -587,9 +648,14 @@ mod tests {
 
     fn db() -> Connection {
         let c = Connection::open_in_memory().unwrap();
-        c.execute_batch(include_str!("../migrations/001_init.sql")).unwrap();
-        c.execute_batch(include_str!("../migrations/003_scheduling_rules.sql")).unwrap();
-        c.execute_batch(include_str!("../migrations/017_provider_unavailability.sql")).unwrap();
+        c.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        c.execute_batch(include_str!("../migrations/003_scheduling_rules.sql"))
+            .unwrap();
+        c.execute_batch(include_str!(
+            "../migrations/017_provider_unavailability.sql"
+        ))
+        .unwrap();
         c.execute_batch(
             "ALTER TABLE audit_log ADD COLUMN actor_user_id INTEGER;
              ALTER TABLE audit_log ADD COLUMN actor_display_name TEXT;
@@ -764,7 +830,11 @@ mod tests {
             ],
         );
         assert!(result.is_err());
-        let status: String = c.query_row("SELECT status FROM appointments WHERE id=1", [], |r| r.get(0)).unwrap();
+        let status: String = c
+            .query_row("SELECT status FROM appointments WHERE id=1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
         assert_eq!(status, "scheduled");
     }
 }
