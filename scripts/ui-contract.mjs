@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 const read = (path) => readFileSync(path, 'utf8');
 const tight = (text) => text.replace(/\s+/g, '');
+// Provider-unavailability resume-after-restart is a permanent release regression gate.
 const files = {
   app: read('src/App.tsx'),
   auth: read('src/AuthGate.tsx'),
