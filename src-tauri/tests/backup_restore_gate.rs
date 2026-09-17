@@ -77,7 +77,10 @@ fn archived_attachment_survives_full_backup_and_restore() {
     let archived = attachments::list_archived(&copied, patient_id).unwrap();
     assert_eq!(archived.len(), 1);
     assert_eq!(archived[0].display_name, "مرفق مؤرشف");
-    assert_eq!(archived[0].deleted_reason.as_deref(), Some("اختبار الاستعادة"));
+    assert_eq!(
+        archived[0].deleted_reason.as_deref(),
+        Some("اختبار الاستعادة")
+    );
     assert_eq!(archived[0].sha256, format!("{:x}", Sha256::digest(&bytes)));
     drop(copied);
 
@@ -96,7 +99,11 @@ fn archived_attachment_survives_full_backup_and_restore() {
     let restored = attachments::list_archived(&live_conn, patient_id).unwrap();
     assert_eq!(restored.len(), 1);
     assert_eq!(restored[0].stored_name, stored_name);
-    let restored_path = live.parent().unwrap().join("attachments").join(&stored_name);
+    let restored_path = live
+        .parent()
+        .unwrap()
+        .join("attachments")
+        .join(&stored_name);
     assert_eq!(fs::read(&restored_path).unwrap(), bytes);
     assert_eq!(
         backup::sha256_file(&restored_path).unwrap(),
@@ -139,11 +146,9 @@ fn tampered_archived_attachment_blocks_restore_before_live_change() {
 
     assert!(backup::restore_database(&mut live_conn, &backup_path, &live, SCHEMA).is_err());
     let retained: String = live_conn
-        .query_row(
-            "SELECT full_name FROM patients WHERE file_no=77",
-            [],
-            |r| r.get(0),
-        )
+        .query_row("SELECT full_name FROM patients WHERE file_no=77", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(retained, "يجب أن يبقى");
 
