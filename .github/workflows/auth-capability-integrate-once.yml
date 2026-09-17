@@ -6,7 +6,7 @@ permissions:
   contents: write
 jobs:
   integrate:
-    if: github.event.head_commit.message == 'Integrate explicit deputy restore capability'
+    if: github.event.head_commit.message == 'Retry explicit deputy restore integration'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,24 +15,21 @@ jobs:
       - name: Wire migration and Tauri commands
         shell: python
         run: |
+          import re
           from pathlib import Path
           path = Path('src-tauri/src/lib.rs')
           text = path.read_text(encoding='utf-8')
           text = text.replace('const LATEST_SCHEMA_VERSION: i64 = 15;', 'const LATEST_SCHEMA_VERSION: i64 = 16;', 1)
-          migration15 = '''        (
-              15,
-              include_str!("../migrations/015_attachment_restore_limit.sql"),
-          ),
-          '''
-          migration16 = migration15 + '''        (
-              16,
-              include_str!("../migrations/016_role_capability_grants.sql"),
-          ),
-          '''
           if '016_role_capability_grants.sql' not in text:
-              if migration15 not in text:
+              pattern = re.compile(r'(\(\s*15\s*,\s*include_str!\("\.\./migrations/015_attachment_restore_limit\.sql"\)\s*,\s*\),)')
+              replacement = r'''\1
+        (
+            16,
+            include_str!("../migrations/016_role_capability_grants.sql"),
+        ),'''
+              text, count = pattern.subn(replacement, text, count=1)
+              if count != 1:
                   raise SystemExit('migration 15 marker not found')
-              text = text.replace(migration15, migration16, 1)
           handler_marker = '            auth_commands::user_reset_password,\n'
           additions = (
               '            auth_commands::deputy_restore_permission_get,\n'
