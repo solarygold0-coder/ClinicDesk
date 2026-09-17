@@ -2,105 +2,18 @@ import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { openPath } from '@tauri-apps/plugin-opener';
 import { appDataDir, join } from '@tauri-apps/api/path';
-import { ExternalLink, FilePlus2, Paperclip, Trash2 } from 'lucide-react';
+import { Archive, ExternalLink, FilePlus2, Paperclip, RotateCcw } from 'lucide-react';
 import { api, Attachment } from './api';
 
-function sizeLabel(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
-export function PatientAttachments({ patientId }: { patientId: number }) {
-  const [items, setItems] = useState<Attachment[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-
-  async function load() {
-    try {
-      setItems(await api.attachments(patientId));
-      setError('');
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  useEffect(() => {
-    void load();
-  }, [patientId]);
-
-  async function add() {
-    const selected = await open({
-      multiple: false,
-      directory: false,
-      filters: [{ name: 'المرفقات', extensions: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'doc', 'docx'] }],
-    });
-    if (!selected) return;
-    setBusy(true);
-    setError('');
-    try {
-      await api.importAttachment(patientId, selected);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function openAttachment(item: Attachment) {
-    setError('');
-    try {
-      const root = await appDataDir();
-      const path = await join(root, 'attachments', item.storedName);
-      await openPath(path);
-    } catch (e) {
-      setError(`تعذر فتح المرفق: ${String(e)}`);
-    }
-  }
-
-  async function remove(item: Attachment) {
-    if (!confirm(`حذف المرفق ${item.originalName}؟`)) return;
-    setBusy(true);
-    setError('');
-    try {
-      await api.removeAttachment(item.id);
-      await load();
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="recordSummary">
-      <div className="attachmentHeader">
-        <h3><Paperclip /> المرفقات</h3>
-        <button type="button" className="primary" disabled={busy} onClick={() => void add()}>
-          <FilePlus2 /> {busy ? 'جارٍ التنفيذ…' : 'إضافة مرفق'}
-        </button>
-      </div>
-      {error && <div className="error">{error}</div>}
-      {items.length === 0 ? <p>لا توجد مرفقات لهذا المريض.</p> : (
-        <div className="attachmentList">
-          {items.map(item => (
-            <article key={item.id} className="attachmentItem">
-              <Paperclip />
-              <button type="button" className="attachmentOpen" disabled={busy} onClick={() => void openAttachment(item)} title={`فتح ${item.originalName}`}>
-                <span>
-                  <strong>{item.originalName}</strong>
-                  <small>{sizeLabel(item.sizeBytes)} • {new Date(item.createdAt).toLocaleString('ar-SA')}</small>
-                </span>
-                <ExternalLink aria-hidden="true" />
-              </button>
-              <button type="button" className="dangerIcon" disabled={busy} aria-label={`حذف ${item.originalName}`} onClick={() => void remove(item)}>
-                <Trash2 />
-              </button>
-            </article>
-          ))}
-        </div>
-      )}
-    </section>
-  );
+function sizeLabel(bytes:number){if(bytes<1024)return`${bytes} B`;if(bytes<1024*1024)return`${(bytes/1024).toFixed(1)} KB`;return`${(bytes/1024/1024).toFixed(1)} MB`;}
+export function PatientAttachments({patientId}:{patientId:number}){
+ const[items,setItems]=useState<Attachment[]>([]);const[archived,setArchived]=useState<Attachment[]>([]);const[showArchived,setShowArchived]=useState(false);const[busy,setBusy]=useState(false);const[error,setError]=useState('');
+ async function load(){try{const[active,old]=await Promise.all([api.attachments(patientId),api.archivedAttachments(patientId)]);setItems(active);setArchived(old);setError('');}catch(e){setError(String(e));}}
+ useEffect(()=>{void load();},[patientId]);
+ async function add(){const selected=await open({multiple:false,directory:false});if(!selected)return;const defaultName=selected.split(/[\\/]/).pop()||'مرفق';const displayName=prompt('اسم المرفق',defaultName)?.trim();if(!displayName)return;const category=prompt('تصنيف المرفق (اختياري)','')?.trim()||undefined;setBusy(true);setError('');try{await api.importAttachment(patientId,selected,displayName,category);await load();}catch(e){setError(String(e));}finally{setBusy(false);}}
+ async function openAttachment(item:Attachment){setError('');try{const root=await appDataDir();await openPath(await join(root,'attachments',item.storedName));}catch(e){setError(`تعذر فتح المرفق: ${String(e)}`);}}
+ async function archiveItem(item:Attachment){const reason=prompt(`سبب أرشفة ${item.displayName || item.originalName}`,'')?.trim();if(!reason)return;setBusy(true);setError('');try{await api.archiveAttachment(item.id,reason);await load();}catch(e){setError(String(e));}finally{setBusy(false);}}
+ async function restoreItem(item:Attachment){const reason=prompt(`سبب استعادة ${item.displayName || item.originalName}`,'')?.trim();if(!reason)return;setBusy(true);setError('');try{await api.restoreAttachment(item.id,reason);await load();}catch(e){setError(String(e));}finally{setBusy(false);}}
+ const visible=showArchived?archived:items;
+ return <section className="recordSummary" dir="rtl"><div className="attachmentHeader"><h3><Paperclip/> المرفقات <small>({items.length}/20)</small></h3><div><button type="button" disabled={busy} onClick={()=>setShowArchived(v=>!v)}>{showArchived?'عرض النشطة':`الأرشيف (${archived.length})`}</button>{!showArchived&&<button type="button" className="primary" disabled={busy||items.length>=20} onClick={()=>void add()}><FilePlus2/> {busy?'جارٍ التنفيذ…':'إضافة مرفق'}</button>}</div></div>{error&&<div className="error" role="alert">{error}</div>}{items.length>=20&&!showArchived&&<p className="error">وصل الملف إلى الحد الأقصى: 20 مرفقاً نشطاً. أرشف مرفقاً قبل إضافة آخر.</p>}{visible.length===0?<p>{showArchived?'لا توجد مرفقات مؤرشفة.':'لا توجد مرفقات لهذا المريض.'}</p>:<div className="attachmentList">{visible.map(item=><article key={item.id} className="attachmentItem"><Paperclip/><button type="button" className="attachmentOpen" disabled={busy} onClick={()=>void openAttachment(item)} title={`فتح ${item.displayName}`}><span><strong>{item.displayName||item.originalName}</strong><small>{item.category?`${item.category} • `:''}{sizeLabel(item.sizeBytes)} • {new Date(item.createdAt).toLocaleString('ar-SA-u-ca-gregory')}{showArchived&&item.deletedReason?` • سبب الأرشفة: ${item.deletedReason}`:''}</small></span><ExternalLink aria-hidden="true"/></button>{showArchived?<button type="button" disabled={busy||items.length>=20} aria-label={`استعادة ${item.displayName}`} onClick={()=>void restoreItem(item)}><RotateCcw/></button>:<button type="button" className="dangerIcon" disabled={busy} aria-label={`أرشفة ${item.displayName}`} onClick={()=>void archiveItem(item)}><Archive/></button>}</article>)}</div>}</section>;
 }
