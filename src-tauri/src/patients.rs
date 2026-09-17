@@ -1,4 +1,5 @@
-use crate::domain::normalize_digits;
+use crate::{audit, domain::normalize_digits};
+use chrono::{Datelike, NaiveDate};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +51,13 @@ fn validate(input: &PatientInput) -> Result<(String, Option<String>, Option<Stri
     if let Some(v) = &phone {
         if !v.chars().all(|c| c.is_ascii_digit() || c == '+') {
             return Err("رقم الجوال غير صالح".into());
+        }
+    }
+    if let Some(value) = clean(input.birth_date.clone()) {
+        let date = NaiveDate::parse_from_str(&value, "%Y-%m-%d")
+            .map_err(|_| "تاريخ الميلاد غير صالح".to_string())?;
+        if !(1950..=2050).contains(&date.year()) {
+            return Err("تاريخ الميلاد يجب أن يكون بين 1950 و2050".into());
         }
     }
     Ok((name, nid, phone))
@@ -107,13 +115,21 @@ pub fn create(conn: &mut Connection, input: PatientInput) -> Result<Patient, Str
     let file_no = allocate_file_no(&tx)?;
     tx.execute("INSERT INTO patients(file_no,national_id,full_name,phone,birth_date,sex,medical_summary,chronic_diseases,allergies,notes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![file_no,nid,name,phone,clean(input.birth_date),clean(input.sex),clean(input.medical_summary),clean(input.chronic_diseases),clean(input.allergies),clean(input.notes)]).map_err(|e|e.to_string())?;
     let id = tx.last_insert_rowid();
-    tx.execute(
-        "INSERT INTO audit_log(event_type,entity_type,entity_id) VALUES('create','patient',?1)",
-        [id],
-    )
-    .map_err(|e| e.to_string())?;
+    let created = tx
+        .query_row(&format!("{PATIENT_SELECT} WHERE id=?1"), [id], map_patient)
+        .map_err(|e| e.to_string())?;
+    let after_json = serde_json::to_string(&created).map_err(|e| e.to_string())?;
+    audit::record_as(
+        &tx,
+        "create",
+        "patient",
+        Some(id),
+        None,
+        &audit::AuditActor::default(),
+        &audit::AuditChange { before_json: None, after_json: Some(&after_json), reason: None },
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
-    get(conn, id)?.ok_or_else(|| "تعذر قراءة المريض بعد الحفظ".into())
+    Ok(created)
 }
 pub fn get(conn: &Connection, id: i64) -> Result<Option<Patient>, String> {
     conn.query_row(
@@ -158,22 +174,31 @@ pub fn inactive_for_years(
         .map_err(|e| e.to_string())
 }
 pub fn update(conn: &Connection, id: i64, input: PatientInput) -> Result<Patient, String> {
+    let before = get(conn, id)?.ok_or_else(|| "المريض غير موجود".to_string())?;
+    let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
     let (name, nid, phone) = validate(&input)?;
     let changed=conn.execute("UPDATE patients SET national_id=?1,full_name=?2,phone=?3,birth_date=?4,sex=?5,medical_summary=?6,chronic_diseases=?7,allergies=?8,notes=?9,last_activity_at=CURRENT_TIMESTAMP WHERE id=?10 AND deleted_at IS NULL",params![nid,name,phone,clean(input.birth_date),clean(input.sex),clean(input.medical_summary),clean(input.chronic_diseases),clean(input.allergies),clean(input.notes),id]).map_err(|e|if e.to_string().contains("UNIQUE constraint failed"){"يوجد مريض مسجل بنفس رقم الهوية".into()}else{e.to_string()})?;
     if changed == 0 {
         return Err("المريض غير موجود".into());
     }
-    conn.execute(
-        "INSERT INTO audit_log(event_type,entity_type,entity_id) VALUES('update','patient',?1)",
-        [id],
-    )
-    .map_err(|e| e.to_string())?;
-    get(conn, id)?.ok_or_else(|| "المريض غير موجود".into())
+    let after = get(conn, id)?.ok_or_else(|| "المريض غير موجود".to_string())?;
+    let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
+    audit::record_as(
+        conn,
+        "update",
+        "patient",
+        Some(id),
+        None,
+        &audit::AuditActor::default(),
+        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: None },
+    )?;
+    Ok(after)
 }
 pub fn future_appointment_count(conn: &Connection, id: i64) -> Result<i64, String> {
     conn.query_row("SELECT COUNT(*) FROM appointments WHERE patient_id=?1 AND starts_at>CURRENT_TIMESTAMP AND status IN ('scheduled','arrived','in_progress')",[id],|r|r.get(0)).map_err(|e|e.to_string())
 }
 pub fn soft_delete(conn: &Connection, id: i64) -> Result<(), String> {
+    let before = get(conn, id)?.ok_or_else(|| "المريض غير موجود".to_string())?;
     let future = future_appointment_count(conn, id)?;
     if future > 0 {
         return Err(format!(
@@ -189,11 +214,17 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<(), String> {
     if n == 0 {
         return Err("المريض غير موجود".into());
     }
-    conn.execute(
-        "INSERT INTO audit_log(event_type,entity_type,entity_id) VALUES('delete','patient',?1)",
-        [id],
-    )
-    .map_err(|e| e.to_string())?;
+    let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
+    let after_json = serde_json::json!({"patient":before,"archived":true}).to_string();
+    audit::record_as(
+        conn,
+        "delete",
+        "patient",
+        Some(id),
+        None,
+        &audit::AuditActor::default(),
+        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: Some("patient_archived") },
+    )?;
     Ok(())
 }
 #[cfg(test)]
@@ -262,6 +293,13 @@ mod tests {
         assert_eq!(p.chronic_diseases.as_deref(), Some("سكري"));
         assert_eq!(p.allergies.as_deref(), Some("بنسلين"));
         assert_eq!(p.notes.as_deref(), Some("متابعة دورية"));
+    }
+    #[test]
+    fn birth_date_range_is_enforced() {
+        let mut c = db();
+        let mut data = input("مريض تاريخ", "1234567890");
+        data.birth_date = Some("1949-12-31".into());
+        assert!(create(&mut c, data).is_err());
     }
     #[test]
     fn future_appointment_blocks_delete() {
