@@ -397,8 +397,29 @@ fn security_failure(
     error: &str,
     sha: Option<&str>,
 ) {
-    let detail = security_log::operation_detail(stage, security_log::failure_code(error), sha);
-    let _ = security_log::append(log, event_type, "failure", Some(reference), Some(&detail));
+    let _ = security_log::append_operation(
+        log,
+        event_type,
+        "failure",
+        reference,
+        stage,
+        security_log::failure_code(error),
+        sha,
+    );
+}
+fn record_security_log_warning(db: &Connection, reference: &str) {
+    let warning = serde_json::json!({
+        "operationRef": reference,
+        "code": "security_log_write_failed"
+    })
+    .to_string();
+    let _ = audit::record(
+        db,
+        "security_log_write_failed",
+        "database",
+        None,
+        Some(&warning),
+    );
 }
 #[tauri::command]
 fn backup_create(
@@ -409,12 +430,18 @@ fn backup_create(
     let reference = format!("BKP-{}", Uuid::new_v4());
     let log = security_log_path(&app)?;
     security_log::verify(&log)?;
-    let started = security_log::operation_detail("backup_create", "started", None);
-    security_log::append(&log, "backup", "started", Some(&reference), Some(&started))?;
-    let g = db.0.lock().map_err(|e| {
+    security_log::append_operation(
+        &log,
+        "backup",
+        "started",
+        &reference,
+        "preflight",
+        "started",
+        None,
+    )?;
+    let g = db.0.lock().map_err(|_| {
         let err = "تعذر الوصول إلى قاعدة البيانات".to_string();
-        security_failure(&log, "backup", &reference, "db_lock", &err, None);
-        let _ = e;
+        security_failure(&log, "backup", &reference, "database_lock", &err, None);
         err
     })?;
     let hash = match backup::create_database_backup(
@@ -422,19 +449,43 @@ fn backup_create(
         Path::new(&destination_path),
         LATEST_SCHEMA_VERSION,
     ) {
-        Ok(h) => h,
-        Err(e) => {
-            security_failure(&log, "backup", &reference, "backup_create", &e, None);
-            return Err(e);
+        Ok(hash) => hash,
+        Err(error) => {
+            security_failure(
+                &log,
+                "backup",
+                &reference,
+                "backup_create",
+                &error,
+                None,
+            );
+            return Err(error);
         }
     };
     let details = serde_json::json!({"sha256":hash,"backupRef":reference}).to_string();
-    if let Err(e) = audit::record(&g, "backup_created", "database", None, Some(&details)) {
-        security_failure(&log, "backup", &reference, "audit_write", &e, Some(&hash));
-        return Err(e);
+    if let Err(error) = audit::record(&g, "backup_created", "database", None, Some(&details)) {
+        security_failure(
+            &log,
+            "backup",
+            &reference,
+            "audit_write",
+            &error,
+            Some(&hash),
+        );
     }
-    let success = security_log::operation_detail("backup_create", "completed", Some(&hash));
-    security_log::append(&log, "backup", "success", Some(&reference), Some(&success))?;
+    if security_log::append_operation(
+        &log,
+        "backup",
+        "success",
+        &reference,
+        "completed",
+        "ok",
+        Some(&hash),
+    )
+    .is_err()
+    {
+        record_security_log_warning(&g, &reference);
+    }
     Ok(hash)
 }
 #[tauri::command]
@@ -446,102 +497,124 @@ fn backup_restore(
     let reference = format!("RST-{}", Uuid::new_v4());
     let log = security_log_path(&app)?;
     security_log::verify(&log)?;
-    let started = security_log::operation_detail("restore_request", "started", None);
-    security_log::append(&log, "restore", "started", Some(&reference), Some(&started))?;
+    security_log::append_operation(
+        &log,
+        "restore",
+        "started",
+        &reference,
+        "preflight",
+        "started",
+        None,
+    )?;
     let source = Path::new(&source_path);
     let source_hash = match backup::sha256_file(source) {
-        Ok(h) => h,
-        Err(e) => {
-            security_failure(&log, "restore", &reference, "source_read", &e, None);
-            return Err(e);
+        Ok(hash) => hash,
+        Err(error) => {
+            security_failure(&log, "restore", &reference, "source_read", &error, None);
+            return Err(error);
         }
     };
-    if let Err(e) = backup::verify_database(source, LATEST_SCHEMA_VERSION) {
+    if let Err(error) = backup::verify_database(source, LATEST_SCHEMA_VERSION) {
         security_failure(
             &log,
             "restore",
             &reference,
-            "source_verify",
-            &e,
+            "source_database_verify",
+            &error,
             Some(&source_hash),
         );
-        return Err(e);
+        return Err(error);
     }
-    if let Err(e) = backup::verify_attachment_backup(source) {
+    if let Err(error) = backup::verify_attachment_backup(source) {
         security_failure(
             &log,
             "restore",
             &reference,
-            "attachment_verify",
-            &e,
+            "source_attachment_verify",
+            &error,
             Some(&source_hash),
         );
-        return Err(e);
+        return Err(error);
     }
     let mut g = match db.0.lock() {
-        Ok(g) => g,
+        Ok(guard) => guard,
         Err(_) => {
-            let e = "تعذر الوصول إلى قاعدة البيانات".to_string();
+            let error = "تعذر الوصول إلى قاعدة البيانات".to_string();
             security_failure(
                 &log,
                 "restore",
                 &reference,
-                "db_lock",
-                &e,
+                "database_lock",
+                &error,
                 Some(&source_hash),
             );
-            return Err(e);
+            return Err(error);
         }
     };
     let details = serde_json::json!({"sha256":source_hash,"restoreRef":reference}).to_string();
-    if let Err(e) = audit::record(&g, "restore_started", "database", None, Some(&details)) {
+    if let Err(error) = audit::record(&g, "restore_started", "database", None, Some(&details)) {
         security_failure(
             &log,
             "restore",
             &reference,
             "audit_start",
-            &e,
+            &error,
             Some(&source_hash),
         );
-        return Err(e);
+        return Err(error);
     }
-    let live_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| e.to_string())?
-        .join("clinicdesk.sqlite3");
-    match backup::restore_database(&mut g, source, &live_path, LATEST_SCHEMA_VERSION) {
-        Ok(hash) => {
-            audit::record(&g, "restore_completed", "database", None, Some(&details))?;
-            let success =
-                security_log::operation_detail("restore_commit", "completed", Some(&hash));
-            if let Err(log_error) =
-                security_log::append(&log, "restore", "success", Some(&reference), Some(&success))
-            {
-                let warning =
-                    serde_json::json!({"restoreRef":reference,"code":"security_log_write_failed"})
-                        .to_string();
-                let _ = audit::record(
-                    &g,
-                    "security_log_write_failed",
-                    "database",
-                    None,
-                    Some(&warning),
-                );
-                let _ = log_error;
-            }
-            Ok(hash)
-        }
-        Err(e) => {
+    let live_path = match app.path().app_data_dir() {
+        Ok(path) => path.join("clinicdesk.sqlite3"),
+        Err(error) => {
+            let error = error.to_string();
             security_failure(
                 &log,
                 "restore",
                 &reference,
-                "restore_commit",
-                &e,
+                "live_path",
+                &error,
                 Some(&source_hash),
             );
-            Err(e)
+            return Err(error);
+        }
+    };
+    match backup::restore_database(&mut g, source, &live_path, LATEST_SCHEMA_VERSION) {
+        Ok(hash) => {
+            if let Err(error) = audit::record(&g, "restore_completed", "database", None, Some(&details)) {
+                security_failure(
+                    &log,
+                    "restore",
+                    &reference,
+                    "audit_complete",
+                    &error,
+                    Some(&hash),
+                );
+            }
+            if security_log::append_operation(
+                &log,
+                "restore",
+                "success",
+                &reference,
+                "completed",
+                "ok",
+                Some(&hash),
+            )
+            .is_err()
+            {
+                record_security_log_warning(&g, &reference);
+            }
+            Ok(hash)
+        }
+        Err(error) => {
+            security_failure(
+                &log,
+                "restore",
+                &reference,
+                "restore_apply",
+                &error,
+                Some(&source_hash),
+            );
+            Err(error)
         }
     }
 }
