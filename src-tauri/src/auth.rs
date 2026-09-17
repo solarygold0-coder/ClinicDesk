@@ -116,11 +116,8 @@ fn clear_runtime_actor(db: &Connection, session_id: &str) -> Result<(), String> 
         .optional()
         .map_err(|e| e.to_string())?;
     if current.as_deref() == Some(session_id) {
-        db.execute(
-            "DELETE FROM app_meta WHERE key LIKE 'runtime_actor_%'",
-            [],
-        )
-        .map_err(|e| e.to_string())?;
+        db.execute("DELETE FROM app_meta WHERE key LIKE 'runtime_actor_%'", [])
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
