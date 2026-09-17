@@ -1,0 +1,25 @@
+name: Gate refresh once
+
+on:
+  push:
+    branches: [tauri-react-rebuild]
+    paths: [.github/workflows/gate-refresh-once.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  trigger-and-remove:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+          fetch-depth: 0
+      - name: Remove one-shot trigger
+        run: |
+          git rm .github/workflows/gate-refresh-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Remove one-shot gate refresh trigger"
+          git push origin HEAD:tauri-react-rebuild
