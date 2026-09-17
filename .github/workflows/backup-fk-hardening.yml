@@ -19,8 +19,8 @@ jobs:
       - name: Provide generated RGBA test icon required by Tauri context
         run: |
           mkdir -p src-tauri/icons
-          convert -size 32x32 xc:none -alpha on -define png:color-type=6 src-tauri/icons/icon.png
-          identify -verbose src-tauri/icons/icon.png | grep -q 'Type: PaletteAlpha\|Type: TrueColorAlpha'
+          convert -size 32x32 xc:'rgba(0,0,0,0)' PNG32:src-tauri/icons/icon.png
+          test "$(identify -format '%[channels]' src-tauri/icons/icon.png)" = "srgba"
       - name: Add foreign key verification and regression test
         shell: python
         run: |
