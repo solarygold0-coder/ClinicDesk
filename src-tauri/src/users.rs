@@ -56,10 +56,29 @@ pub fn list(db: &Connection) -> Result<Vec<UserAccount>, String> {
         .map_err(|e| e.to_string())
 }
 
-pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount, String> {
+fn map_insert_error(error: rusqlite::Error) -> String {
+    let text = error.to_string();
+    if text.contains("users.username") {
+        "اسم المستخدم مستخدم مسبقًا".to_string()
+    } else if text.contains("role_limit_") {
+        "تم بلوغ الحد الأقصى لهذا الدور الوظيفي".to_string()
+    } else {
+        text
+    }
+}
+
+fn create_internal(
+    db: &mut Connection,
+    input: NewUserAccount,
+    role_type: Option<&str>,
+) -> Result<UserAccount, String> {
     let username = clean_required(&input.username, "اسم المستخدم")?;
     let display_name = clean_required(&input.display_name, "اسم الموظف")?;
     let password_hash = clean_required(&input.password_hash, "بصمة كلمة المرور")?;
+    let role_type = role_type
+        .map(|role| clean_required(role, "الدور الوظيفي"))
+        .transpose()?;
+
     let tx = db.transaction().map_err(|e| e.to_string())?;
     let total: i64 = tx
         .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
@@ -78,24 +97,37 @@ pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount,
         return Err("نفدت رموز المستخدمين الدائمة U01-U62؛ الرموز المعطلة لا يعاد استخدامها".into());
     }
     let employee_code = format!("U{next:02}");
-    tx.execute(
-        "INSERT INTO users(username,display_name,password_hash,is_system_admin,employee_code)
-         VALUES(?1,?2,?3,?4,?5)",
-        params![
-            username,
-            display_name,
-            password_hash,
-            input.is_system_admin.unwrap_or(false) as i64,
-            employee_code
-        ],
-    )
-    .map_err(|e| {
-        if e.to_string().contains("users.username") {
-            "اسم المستخدم مستخدم مسبقًا".to_string()
-        } else {
-            e.to_string()
-        }
-    })?;
+    let is_system_admin = input.is_system_admin.unwrap_or(false) as i64;
+
+    if let Some(role_type) = role_type.as_deref() {
+        tx.execute(
+            "INSERT INTO users(username,display_name,password_hash,is_system_admin,employee_code,role_type)
+             VALUES(?1,?2,?3,?4,?5,?6)",
+            params![
+                username,
+                display_name,
+                password_hash,
+                is_system_admin,
+                employee_code,
+                role_type
+            ],
+        )
+        .map_err(map_insert_error)?;
+    } else {
+        tx.execute(
+            "INSERT INTO users(username,display_name,password_hash,is_system_admin,employee_code)
+             VALUES(?1,?2,?3,?4,?5)",
+            params![
+                username,
+                display_name,
+                password_hash,
+                is_system_admin,
+                employee_code
+            ],
+        )
+        .map_err(map_insert_error)?;
+    }
+
     let id = tx.last_insert_rowid();
     tx.execute(
         "UPDATE identity_sequences SET next_value=?1 WHERE name='employee_code' AND next_value=?2",
@@ -112,6 +144,18 @@ pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount,
         .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(user)
+}
+
+pub fn create(db: &mut Connection, input: NewUserAccount) -> Result<UserAccount, String> {
+    create_internal(db, input, None)
+}
+
+pub fn create_with_role(
+    db: &mut Connection,
+    input: NewUserAccount,
+    role_type: &str,
+) -> Result<UserAccount, String> {
+    create_internal(db, input, Some(role_type))
 }
 
 pub fn set_active(db: &Connection, id: i64, active: bool) -> Result<(), String> {
@@ -149,6 +193,20 @@ mod tests {
         db
     }
 
+    fn role_db() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT NOT NULL COLLATE NOCASE UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,is_active INTEGER NOT NULL DEFAULT 1,is_system_admin INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,employee_code TEXT NOT NULL UNIQUE,role_type TEXT NOT NULL DEFAULT 'ordinary_employee');
+             CREATE TABLE identity_sequences(name TEXT PRIMARY KEY,next_value INTEGER NOT NULL);
+             INSERT INTO identity_sequences VALUES('employee_code',1);
+             CREATE TABLE auth_sessions(id TEXT PRIMARY KEY,user_id INTEGER NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,expires_at TEXT NOT NULL,revoked_at TEXT);
+             CREATE TRIGGER users_role_limit_insert BEFORE INSERT ON users
+             WHEN NEW.role_type='general_manager' AND (SELECT COUNT(*) FROM users WHERE role_type='general_manager') >= 1
+             BEGIN SELECT RAISE(ABORT,'role_limit_general_manager'); END;",
+        ).unwrap();
+        db
+    }
+
     fn input(n: i64) -> NewUserAccount {
         NewUserAccount {
             username: format!("user{n}"),
@@ -178,5 +236,22 @@ mod tests {
         }
         let err = create(&mut db, input(63)).unwrap_err();
         assert!(err.contains("62"));
+    }
+
+    #[test]
+    fn rejected_role_insert_rolls_back_account_and_employee_code() {
+        let mut db = role_db();
+        let first = create_with_role(&mut db, input(1), "general_manager").unwrap();
+        assert_eq!(first.employee_code, "U01");
+
+        let err = create_with_role(&mut db, input(2), "general_manager").unwrap_err();
+        assert!(err.contains("الحد الأقصى"));
+        let count: i64 = db.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0)).unwrap();
+        let next: i64 = db.query_row("SELECT next_value FROM identity_sequences WHERE name='employee_code'", [], |r| r.get(0)).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(next, 2);
+
+        let second = create_with_role(&mut db, input(3), "ordinary_employee").unwrap();
+        assert_eq!(second.employee_code, "U02");
     }
 }
