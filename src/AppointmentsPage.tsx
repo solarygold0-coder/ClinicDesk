@@ -12,6 +12,7 @@ import {
   VisitTrackingInput,
 } from './api';
 import { getSaudiScheduleAdvisories } from './saudiScheduleAdvisory';
+import { fullGregorianDate, fullGregorianDateTime } from './dateDisplay';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const day = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -223,7 +224,7 @@ export function AppointmentsPage({
   const maxDay = daysInMonth(clamp(y, 1950, 2050), clamp(mo, 1, 12));
   return (
     <section className="page appointmentsPage print-scope" dir="rtl" aria-busy={busy || statusBusyId !== null}>
-      <div className="printOnly printHeader"><h1>ClinicDesk — مواعيد اليوم</h1><p>التاريخ الميلادي: <bdi>{date}</bdi> • عدد المواعيد: {rows.length}</p></div>
+      <div className="printOnly printHeader"><h1>ClinicDesk — مواعيد اليوم</h1><p>التاريخ الميلادي: {fullGregorianDate(date)} • عدد المواعيد: {rows.length}</p></div>
       <div className="pageTitle noPrint">
         <div><h1>المواعيد</h1><p>جدولة المراجعين وإدارة حركة اليوم</p></div>
         <div className="headActions"><button type="button" onClick={() => window.print()}><Printer aria-hidden="true" />طباعة اليوم</button><button type="button" className="primary" disabled={busy} onClick={add}><CalendarPlus aria-hidden="true" />موعد جديد</button></div>
@@ -241,7 +242,7 @@ export function AppointmentsPage({
             <thead><tr><th>الوقت</th><th>رقم الملف</th><th>المريض</th><th>العيادة</th><th>الطبيب</th><th>الحالة</th><th className="noPrint">إجراءات</th></tr></thead>
             <tbody>{rows.map((a) => (
               <tr key={a.id}>
-                <td dir="ltr">{new Date(a.startsAt).toLocaleTimeString('ar-SA-u-ca-gregory', { hour: 'numeric', minute: '2-digit' })}</td>
+                <td dir="ltr">{fullGregorianDateTime(a.startsAt)}</td>
                 <td><button type="button" className="linkButton noPrint" onClick={() => onPatient(a.fileNo)} aria-label={`فتح ملف المريض رقم ${a.fileNo}`}><bdi>{a.fileNo}</bdi></button><span className="printOnly"><bdi>{a.fileNo}</bdi></span></td>
                 <td><button type="button" className="linkButton noPrint" onClick={() => onPatient(a.fileNo)}>{a.patientName}</button><span className="printOnly">{a.patientName}</span></td>
                 <td>{a.clinicName || '—'}</td><td>{a.doctorName || '—'}</td>

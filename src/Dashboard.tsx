@@ -11,6 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { api, Appointment, FollowUpVisit, Patient } from './api';
+import { fullGregorianDateTime } from './dateDisplay';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const day = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -185,11 +186,7 @@ export function Dashboard({
                           <b>{a.patientName}</b>
                           <small>
                             موعد قريب • ملف <bdi>{a.fileNo}</bdi> •{' '}
-                            {new Date(a.startsAt).toLocaleString('ar-SA-u-ca-gregory', {
-                              weekday: 'short',
-                              hour: 'numeric',
-                              minute: '2-digit',
-                            })}
+                            {fullGregorianDateTime(a.startsAt)}
                           </small>
                         </span>
                       </button>
@@ -233,7 +230,7 @@ export function Dashboard({
                 <CalendarDays aria-hidden="true" />
                 <span>
                   <b>{a.patientName}</b>
-                  <small>ملف <bdi>{a.fileNo}</bdi> • {new Date(a.startsAt).toLocaleString('ar-SA-u-ca-gregory', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small>
+                  <small>ملف <bdi>{a.fileNo}</bdi> • {fullGregorianDateTime(a.startsAt)}</small>
                 </span>
               </button>
             ))}
@@ -284,7 +281,7 @@ export function Dashboard({
               <div className="dashboardAppointments">
                 {followFiltered.slice(0, 10).map((a) => (
                   <button key={`follow-${a.appointmentId}`} type="button" onClick={() => onPatient(a.fileNo)}>
-                    <time dir="ltr">{new Date(a.followUpAt).toLocaleString('ar-SA-u-ca-gregory', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</time>
+                    <time dir="ltr">{fullGregorianDateTime(a.followUpAt)}</time>
                     <span><b>{a.patientName}</b><small>ملف <bdi>{a.fileNo}</bdi> • {a.visitType === 'renewal' ? 'تجديد' : 'متابعة'}</small></span>
                   </button>
                 ))}
@@ -296,7 +293,7 @@ export function Dashboard({
             <div className="dashboardAppointments">
               {filtered.slice(0, 10).map((a) => (
                 <button key={a.id} type="button" onClick={() => onPatient(a.fileNo)}>
-                  <time dir="ltr">{new Date(a.startsAt).toLocaleString('ar-SA-u-ca-gregory', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}</time>
+                  <time dir="ltr">{fullGregorianDateTime(a.startsAt)}</time>
                   <span><b>{a.patientName}</b><small>ملف <bdi>{a.fileNo}</bdi> • {a.clinicName || a.doctorName || 'بدون تحديد'}</small></span>
                   <em className={`status status-${a.status}`}>{labels[a.status] || a.status}</em>
                 </button>

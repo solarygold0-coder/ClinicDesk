@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { api, Appointment, Patient, PatientInput } from './api';
 import { PatientAttachments } from './PatientAttachments';
+import { fullGregorianDate, fullGregorianDateTime } from './dateDisplay';
 
 const blank: PatientInput = {
   fullName: '',
@@ -258,7 +259,7 @@ export function PatientsPage({
             <div className="recordGrid">
               <article><IdCard aria-hidden="true" /><span><small>رقم الهوية</small><strong dir="ltr">{details.nationalId || 'غير مسجل'}</strong></span></article>
               <article><Phone aria-hidden="true" /><span><small>رقم الجوال</small><strong dir="ltr">{details.phone || 'غير مسجل'}</strong></span></article>
-              <article><CalendarDays aria-hidden="true" /><span><small>تاريخ الميلاد</small><strong dir="ltr">{details.birthDate || 'غير مسجل'}</strong></span></article>
+              <article><CalendarDays aria-hidden="true" /><span><small>تاريخ الميلاد</small><strong>{fullGregorianDate(details.birthDate)}</strong></span></article>
               <article><UserPlus aria-hidden="true" /><span><small>الجنس</small><strong>{details.sex || 'غير محدد'}</strong></span></article>
             </div>
             <section className="recordSummary"><h3>المعلومات الطبية المختصرة</h3><p>{details.medicalSummary || 'لا توجد معلومات طبية مختصرة مسجلة.'}</p></section>
@@ -270,7 +271,7 @@ export function PatientsPage({
               <h3><CalendarDays aria-hidden="true" /> سجل المواعيد</h3>
               {historyBusy ? <p>جارٍ تحميل المواعيد…</p> : history.length === 0 ? <p>لا توجد مواعيد مسجلة لهذا المريض.</p> : (
                 <div className="patientHistory">{history.map((a) => (
-                  <article key={a.id}><Clock3 aria-hidden="true" /><span><strong>{new Date(a.startsAt).toLocaleString('ar-SA-u-ca-gregory', { dateStyle: 'medium', timeStyle: 'short' })}</strong><small>{a.clinicName || 'بدون عيادة'}{a.doctorName ? ` • ${a.doctorName}` : ''}</small></span><em className={`status status-${a.status}`}>{status[a.status] || a.status}</em></article>
+                  <article key={a.id}><Clock3 aria-hidden="true" /><span><strong>{fullGregorianDateTime(a.startsAt)}</strong><small>{a.clinicName || 'بدون عيادة'}{a.doctorName ? ` • ${a.doctorName}` : ''}</small></span><em className={`status status-${a.status}`}>{status[a.status] || a.status}</em></article>
                 ))}</div>
               )}
             </section>
