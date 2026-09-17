@@ -4,10 +4,9 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let guard = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let guard =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&guard)
 }
 
@@ -39,10 +38,9 @@ pub fn user_create(
     password: String,
     role_type: String,
 ) -> Result<auth::UserSummary, String> {
-    let mut guard = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut guard =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     authorize_user_management(&guard, actor_token.as_deref())?;
     auth::create_user(&mut guard, username, display_name, password, role_type)
 }
