@@ -404,20 +404,26 @@ fn record_action(
     after: &AppointmentSnapshot,
     details: ActionRecordDetails<'_>,
 ) -> Result<(), String> {
+    let ActionRecordDetails {
+        action_type,
+        replacement_doctor_id,
+        new_starts_at,
+        replacement_appointment_id,
+    } = details;
     c.execute(
         "INSERT INTO provider_unavailability_actions(
-            event_id,appointment_id,details.action_type,original_doctor_id,details.replacement_doctor_id,
-            original_starts_at,details.new_starts_at,details.replacement_appointment_id,reason_code,reason_note
+            event_id,appointment_id,action_type,original_doctor_id,replacement_doctor_id,
+            original_starts_at,new_starts_at,replacement_appointment_id,reason_code,reason_note
          ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         params![
             event.id,
             before.id,
-            details.action_type,
+            action_type,
             before.doctor_id,
-            details.replacement_doctor_id,
+            replacement_doctor_id,
             before.starts_at,
-            details.new_starts_at,
-            details.replacement_appointment_id,
+            new_starts_at,
+            replacement_appointment_id,
             event.reason_code,
             event.reason_note,
         ],
@@ -425,23 +431,23 @@ fn record_action(
     .map_err(|e| e.to_string())?;
     let before_json = snapshot_json(before);
     let after_json = snapshot_json(after);
-    let details = serde_json::json!({
+    let audit_details = serde_json::json!({
         "eventId": event.id,
-        "action": details.action_type,
+        "action": action_type,
         "originalDoctorId": before.doctor_id,
-        "replacementDoctorId": details.replacement_doctor_id,
+        "replacementDoctorId": replacement_doctor_id,
         "oldStartsAt": before.starts_at,
-        "newStartsAt": details.new_starts_at,
-        "replacementAppointmentId": details.replacement_appointment_id,
+        "newStartsAt": new_starts_at,
+        "replacementAppointmentId": replacement_appointment_id,
     })
     .to_string();
     let reason = event.reason_note.as_deref().unwrap_or(&event.reason_code);
     audit::record_as(
         c,
-        &format!("provider_unavailability_{details.action_type}"),
+        &format!("provider_unavailability_{action_type}"),
         "appointment",
         Some(before.id),
-        Some(&details),
+        Some(&audit_details),
         &audit::AuditActor::default(),
         &audit::AuditChange {
             before_json: Some(&before_json),
