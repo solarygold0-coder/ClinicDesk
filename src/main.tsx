@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
 import './rtl.css';
+import './print.css';
 
 document.documentElement.lang = 'ar';
 document.documentElement.dir = 'rtl';
