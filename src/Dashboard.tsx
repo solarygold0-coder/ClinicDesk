@@ -8,6 +8,7 @@ import {
   Search,
   UserPlus,
   Users,
+  X,
 } from 'lucide-react';
 import { api, Appointment, FollowUpVisit, Patient } from './api';
 
@@ -54,6 +55,7 @@ export function Dashboard({
   const [missedRows, setMissedRows] = useState<Appointment[]>([]);
   const [followUps, setFollowUps] = useState<FollowUpVisit[]>([]);
   const [alerts, setAlerts] = useState<Appointment[]>([]);
+  const [showUpcomingReminder, setShowUpcomingReminder] = useState(false);
   const [inactive, setInactive] = useState<Patient[]>([]);
   const [patientCount, setPatientCount] = useState<number | null>(null);
   const [showAlerts, setShowAlerts] = useState(false);
@@ -80,14 +82,26 @@ export function Dashboard({
       api.inactivePatients(10, 100),
     ])
       .then(([a, next, range, upcoming, missed, followUpRows, totalPatients, inactivePatients]) => {
+        const nextAlerts = next.filter((x) => x.status === 'scheduled' && new Date(x.startsAt).getTime() >= now.getTime());
         setRows(a);
-        setAlerts(next.filter((x) => x.status === 'scheduled' && new Date(x.startsAt).getTime() >= now.getTime()));
+        setAlerts(nextAlerts);
         setRangeRows(range);
         setUpcomingRows(upcoming);
         setMissedRows(missed);
         setFollowUps(followUpRows);
         setPatientCount(totalPatients);
         setInactive(inactivePatients);
+        if (nextAlerts.length > 0) {
+          const reminderKey = `clinicdesk.two-day-reminder.${today}`;
+          try {
+            if (!sessionStorage.getItem(reminderKey)) {
+              setShowUpcomingReminder(true);
+              sessionStorage.setItem(reminderKey, 'shown');
+            }
+          } catch {
+            setShowUpcomingReminder(true);
+          }
+        }
         setError('');
       })
       .catch((e) => setError(String(e)));
@@ -203,6 +217,29 @@ export function Dashboard({
       </header>
 
       {error && <div className="error" role="alert">{error}</div>}
+
+      {showUpcomingReminder && alerts.length > 0 && (
+        <section className="panel upcomingReminder noPrint" role="dialog" aria-modal="false" aria-labelledby="two-day-reminder-title">
+          <div className="panelHead">
+            <div>
+              <h2 id="two-day-reminder-title"><Bell aria-hidden="true" /> تنبيه صامت للمواعيد القادمة</h2>
+              <p>لديك {alerts.length} موعد/مواعيد خلال اليومين القادمين. يظهر هذا التنبيه داخل التطبيق فقط وبدون صوت.</p>
+            </div>
+            <button className="icon" type="button" aria-label="إغلاق تنبيه المواعيد القادمة" onClick={() => setShowUpcomingReminder(false)}><X aria-hidden="true" /></button>
+          </div>
+          <div className="alertList">
+            {alerts.slice(0, 8).map((a) => (
+              <button key={`two-day-${a.id}`} type="button" onClick={() => onPatient(a.fileNo)}>
+                <CalendarDays aria-hidden="true" />
+                <span>
+                  <b>{a.patientName}</b>
+                  <small>ملف <bdi>{a.fileNo}</bdi> • {new Date(a.startsAt).toLocaleString('ar-SA-u-ca-gregory', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</small>
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="quick" aria-label="إجراءات سريعة">
         <button type="button" onClick={onPatientSearch} aria-keyshortcuts="F2">
