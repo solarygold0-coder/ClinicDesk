@@ -24,7 +24,7 @@ const DEPUTY_ROLE: &str = "deputy_manager";
 
 pub fn auth_enabled(db: &Connection) -> Result<bool, String> {
     db.query_row(
-        "SELECT auth_enabled FROM security_settings WHERE id=1",
+        "SELECT CASE WHEN EXISTS(SELECT 1 FROM users) THEN 1 ELSE auth_enabled END FROM security_settings WHERE id=1",
         [],
         |row| row.get::<_, i64>(0),
     )
@@ -149,7 +149,9 @@ mod tests {
     fn db() -> Connection {
         let db = Connection::open_in_memory().unwrap();
         db.execute_batch(
-            "CREATE TABLE security_settings(id INTEGER PRIMARY KEY CHECK(id=1),auth_enabled INTEGER NOT NULL DEFAULT 0);\
+            "CREATE TABLE app_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);\
+             CREATE TABLE audit_log(id INTEGER PRIMARY KEY,event_type TEXT NOT NULL,entity_type TEXT NOT NULL,entity_id INTEGER,details_json TEXT,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,actor_user_id INTEGER,actor_display_name TEXT,actor_employee_code TEXT,actor_session_id TEXT,before_json TEXT,after_json TEXT,reason TEXT);\
+             CREATE TABLE security_settings(id INTEGER PRIMARY KEY CHECK(id=1),auth_enabled INTEGER NOT NULL DEFAULT 0);\
              INSERT INTO security_settings(id,auth_enabled) VALUES(1,0);\
              CREATE TABLE users(id INTEGER PRIMARY KEY,username TEXT NOT NULL COLLATE NOCASE UNIQUE,display_name TEXT NOT NULL,password_hash TEXT NOT NULL,is_active INTEGER NOT NULL DEFAULT 1,is_system_admin INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,employee_code TEXT NOT NULL UNIQUE,role_type TEXT NOT NULL DEFAULT 'ordinary_employee',account_status TEXT NOT NULL DEFAULT 'ACTIVE',last_successful_login_at TEXT,closed_at TEXT,closed_reason TEXT,must_change_password INTEGER NOT NULL DEFAULT 0);\
              CREATE TABLE identity_sequences(name TEXT PRIMARY KEY,next_value INTEGER NOT NULL);\
@@ -178,11 +180,19 @@ mod tests {
     }
 
     #[test]
-    fn local_mode_allows_operations_without_fake_user() {
+    fn bootstrap_mode_only_exists_before_first_account() {
         let db = db();
-        assert!(authorize(&db, None, BACKUP_RESTORE).unwrap().is_none());
-        set_deputy_restore_grant(&db, None, true).unwrap();
-        assert!(deputy_restore_granted(&db, None).unwrap());
+        assert!(!auth_enabled(&db).unwrap());
+    }
+
+    #[test]
+    fn first_account_forces_auth_even_if_legacy_flag_is_zero() {
+        let mut db = db();
+        let _ = session(&mut db, 1, "general_manager");
+        db.execute("UPDATE security_settings SET auth_enabled=0 WHERE id=1", [])
+            .unwrap();
+        assert!(auth_enabled(&db).unwrap());
+        assert!(authorize(&db, None, USER_MANAGE).is_err());
     }
 
     #[test]
@@ -190,8 +200,6 @@ mod tests {
         for role in ["doctor", "specialist"] {
             let mut db = db();
             let token = session(&mut db, 1, role);
-            db.execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
-                .unwrap();
             assert!(authorize(&db, Some(&token), APPOINTMENT_READ).is_ok());
             assert!(authorize(&db, Some(&token), APPOINTMENT_WRITE).is_err());
             assert!(authorize(&db, Some(&token), PATIENT_READ).is_err());
@@ -203,8 +211,6 @@ mod tests {
     fn ordinary_employee_can_operate_but_cannot_administer_security() {
         let mut db = db();
         let token = session(&mut db, 1, "ordinary_employee");
-        db.execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
-            .unwrap();
         assert!(authorize(&db, Some(&token), PATIENT_WRITE).is_ok());
         assert!(authorize(&db, Some(&token), APPOINTMENT_WRITE).is_ok());
         assert!(authorize(&db, Some(&token), USER_MANAGE).is_err());
@@ -217,8 +223,6 @@ mod tests {
         let mut db = db();
         let deputy = session(&mut db, 1, "deputy_manager");
         let manager = session(&mut db, 2, "general_manager");
-        db.execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
-            .unwrap();
 
         assert!(authorize(&db, Some(&deputy), USER_MANAGE).is_ok());
         assert!(authorize(&db, Some(&deputy), BACKUP_CREATE).is_ok());
@@ -245,8 +249,6 @@ mod tests {
     fn deputy_does_not_inherit_unknown_future_capabilities() {
         let mut db = db();
         let token = session(&mut db, 1, "deputy_manager");
-        db.execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
-            .unwrap();
         assert!(authorize(&db, Some(&token), "future.security.capability").is_err());
     }
 
@@ -254,8 +256,6 @@ mod tests {
     fn enabled_auth_rejects_missing_or_revoked_session() {
         let mut db = db();
         let token = session(&mut db, 1, "general_manager");
-        db.execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
-            .unwrap();
         assert!(authorize(&db, None, USER_MANAGE).is_err());
         auth::logout(&db, token.clone()).unwrap();
         assert!(authorize(&db, Some(&token), USER_MANAGE).is_err());
