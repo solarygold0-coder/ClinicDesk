@@ -14,6 +14,14 @@ function extensionLabel(name: string) {
   const ext = name.split('.').pop()?.toUpperCase();
   return ext && ext !== name.toUpperCase() ? ext : 'ملف';
 }
+function fullGregorianDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const text = date.toLocaleString('ar-SA-u-ca-gregory', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  return `${text} • الشهر ${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
 
 export function PatientAttachments({ patientId }: { patientId: number }) {
   const [items, setItems] = useState<Attachment[]>([]);
@@ -115,7 +123,7 @@ export function PatientAttachments({ patientId }: { patientId: number }) {
             <article key={item.id} className="attachmentItem">
               <Paperclip aria-hidden="true" />
               <button type="button" className="attachmentOpen" disabled={busy} onClick={() => void openAttachment(item)} aria-label={`فتح المرفق ${item.displayName || item.originalName}`} title={`فتح ${item.displayName || item.originalName}`}>
-                <span><strong>{item.displayName || item.originalName}</strong><small><bdi>{extensionLabel(item.originalName)}</bdi> • {item.category ? `${item.category} • ` : ''}{sizeLabel(item.sizeBytes)} • {new Date(item.createdAt).toLocaleString('ar-SA-u-ca-gregory')}{showArchived && item.deletedReason ? ` • سبب الأرشفة: ${item.deletedReason}` : ''}</small></span>
+                <span><strong>{item.displayName || item.originalName}</strong><small><bdi>{extensionLabel(item.originalName)}</bdi> • {item.category ? `${item.category} • ` : ''}{sizeLabel(item.sizeBytes)} • {fullGregorianDateTime(item.createdAt)}{showArchived && item.deletedReason ? ` • سبب الأرشفة: ${item.deletedReason}` : ''}</small></span>
                 <ExternalLink aria-hidden="true" />
               </button>
               <button type="button" className="noPrint" disabled={busy} aria-label={`فتح ${item.displayName || item.originalName} للطباعة`} title="فتح في البرنامج الافتراضي للطباعة" onClick={() => void openAttachment(item)}><Printer aria-hidden="true" /></button>
