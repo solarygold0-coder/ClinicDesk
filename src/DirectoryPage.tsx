@@ -106,7 +106,7 @@ export function DirectoryPage() {
   }
 
   return (
-    <section className="page" aria-busy={busy}>
+    <section className="page directoryPage" dir="rtl" aria-busy={busy}>
       <div className="pageTitle"><div><h1>العيادات والأطباء</h1><p>ابدأ فارغًا وأضف بيانات منشأتك فقط. يمكنك التعديل أو التعطيل دون حذف السجل التاريخي.</p></div></div>
       {error && <div className="error" role="alert">{error}</div>}
       <div className="directoryGrid">

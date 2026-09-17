@@ -191,7 +191,7 @@ export function AppointmentsPage({
   const [y, mo, da, hr, mn] = parts(form.startsAt);
   const maxDay = daysInMonth(clamp(y, 1950, 2050), clamp(mo, 1, 12));
   return (
-    <section className="page appointmentsPage print-scope" aria-busy={busy || statusBusyId !== null}>
+    <section className="page appointmentsPage print-scope" dir="rtl" aria-busy={busy || statusBusyId !== null}>
       <div className="printOnly printHeader"><h1>ClinicDesk — مواعيد اليوم</h1><p>التاريخ الميلادي: <bdi>{date}</bdi> • عدد المواعيد: {rows.length}</p></div>
       <div className="pageTitle noPrint">
         <div><h1>المواعيد</h1><p>جدولة المراجعين وإدارة حركة اليوم</p></div>
@@ -227,7 +227,7 @@ export function AppointmentsPage({
 
       {open && (
         <div className="modalBackdrop noPrint" onMouseDown={(e) => e.target === e.currentTarget && !busy && setOpen(false)}>
-          <form className="modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="appointment-form-title" aria-busy={busy}>
+          <form className="modal" dir="rtl" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="appointment-form-title" aria-busy={busy}>
             <div className="modalHead">
               <div><h2 id="appointment-form-title">{editing !== null ? 'تعديل الموعد' : 'إضافة موعد'}</h2><p>{editing !== null ? (visitReady ? 'عدّل بيانات الموعد وسيعاد فحص التعارضات تلقائيًا.' : 'جارٍ تحميل بيانات الزيارة الحالية…') : 'أدخل رقم الملف للتحقق من المريض قبل الحفظ.'}</p></div>
               <button type="button" className="icon" disabled={busy} aria-label="إغلاق نموذج الموعد" onClick={() => setOpen(false)}><X aria-hidden="true" /></button>

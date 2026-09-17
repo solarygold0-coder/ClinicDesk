@@ -199,7 +199,7 @@ export function PatientsPage({
   }
 
   return (
-    <section className="page" aria-busy={busy}>
+    <section className="page patientsPage" dir="rtl" aria-busy={busy}>
       <div className="pageTitle">
         <div><h1>المرضى</h1><p>إدارة ملفات المرضى والبحث السريع</p></div>
         <button type="button" className="primary" disabled={busy} onClick={add}><UserPlus aria-hidden="true" />إضافة مريض</button>
@@ -249,7 +249,7 @@ export function PatientsPage({
 
       {details && (
         <div className="modalBackdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && setDetails(null)}>
-          <div className="modal patientRecord print-scope" role="dialog" aria-modal="true" aria-labelledby="patient-record-title">
+          <div className="modal patientRecord print-scope" dir="rtl" role="dialog" aria-modal="true" aria-labelledby="patient-record-title">
             <div className="printOnly printHeader"><h1>ClinicDesk — ملف مريض</h1><p>رقم الملف: <bdi>{details.fileNo}</bdi> • {details.fullName}</p></div>
             <div className="modalHead">
               <div><h2 id="patient-record-title">{details.fullName}</h2><p>ملف المريض رقم <bdi>{details.fileNo}</bdi></p></div>
@@ -285,7 +285,7 @@ export function PatientsPage({
 
       {open && (
         <div className="modalBackdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && setOpen(false)}>
-          <form className="modal" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="patient-form-title" aria-busy={busy}>
+          <form className="modal" dir="rtl" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="patient-form-title" aria-busy={busy}>
             <div className="modalHead">
               <div><h2 id="patient-form-title">{editing ? 'تعديل بيانات المريض' : 'إضافة مريض'}</h2><p>{editing ? `رقم الملف ${editing.fileNo} ثابت ولا يتغير.` : 'سيُنشأ رقم الملف تلقائيًا بالتسلسل.'}</p></div>
               <button type="button" className="icon" disabled={busy} aria-label="إغلاق نموذج المريض" onClick={() => setOpen(false)}><X aria-hidden="true" /></button>

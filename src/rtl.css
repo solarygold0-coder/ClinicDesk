@@ -79,3 +79,21 @@ td,
     inset-inline: 20px;
   }
 }
+
+/* Operational surfaces own their RTL context instead of relying only on ancestor inheritance. */
+.modal,
+.modalHead,
+.formGrid,
+.modalActions,
+.pageTitle,
+.tableCard,
+.directoryGrid,
+.settingsGrid,
+.card,
+.attachmentHeader,
+.attachmentList,
+.attachmentItem,
+.providerUnavailabilityPage {
+  direction: rtl;
+  text-align: start;
+}

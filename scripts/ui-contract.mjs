@@ -35,6 +35,10 @@ const checks = [
   ['document language is Arabic', t.main.includes("document.documentElement.lang='ar'")],
   ['document direction is RTL', t.main.includes("document.documentElement.dir='rtl'")],
   ['RTL stylesheet enforces page direction and logical sidebar/mobile boundaries', files.main.includes("'./rtl.css'") && t.rtl.includes('.page{direction:rtl;text-align:start;}') && t.rtl.includes('.app>aside{border-inline-start:0;border-inline-end:1pxsolid#e6ebf1;}') && t.rtl.includes('.alertsPopover{inset-inline:20px;}') && !files.rtl.includes('left: 20px') && !files.rtl.includes('right: 20px')],
+  ['operational page roots own explicit RTL direction', t.patients.includes('<sectionclassName="pagepatientsPage"dir="rtl"') && t.appointments.includes('<sectionclassName="pageappointmentsPageprint-scope"dir="rtl"') && t.directory.includes('<sectionclassName="pagedirectoryPage"dir="rtl"') && t.users.includes('<sectionclassName="pageusersPage"dir="rtl"') && t.audit.includes('<sectionclassName="pageauditPage"dir="rtl"') && t.scheduling.includes('<sectionclassName="pageschedulingPage"dir="rtl"') && t.readOnlyAppointments.includes('<sectionclassName="pageappointmentsPageprint-scope"dir="rtl"') && t.providerUnavailability.includes('<sectionclassName="pageproviderUnavailabilityPage"dir="rtl"')],
+  ['patient and appointment dialogs own explicit RTL direction', t.patients.includes('className="modalpatientRecordprint-scope"dir="rtl"role="dialog"') && t.patients.includes('className="modal"dir="rtl"onSubmit={submit}role="dialog"') && t.appointments.includes('className="modal"dir="rtl"onSubmit={submit}role="dialog"')],
+  ['authentication and attachments keep RTL roots with isolated LTR fields', t.auth.includes('className="authShell"dir="rtl"') && t.attachments.includes('className="recordSummary"dir="rtl"') && files.auth.includes('dir="ltr"') && files.attachments.includes('<bdi>')],
+  ['RTL stylesheet independently hardens dialogs forms cards and data surfaces', t.rtl.includes('.modal,.modalHead,.formGrid,.modalActions,.pageTitle,.tableCard,.directoryGrid,.settingsGrid,.card,.attachmentHeader,.attachmentList,.attachmentItem,.providerUnavailabilityPage{direction:rtl;text-align:start;}')],
   ['UI hardening stylesheet is loaded', files.main.includes("'./ui-fixes.css'")],
   ['accountability stylesheet is loaded', files.main.includes("'./accountability.css'") && t.accountability.includes('.authShell{') && t.accountability.includes('.usersPage') && t.accountability.includes('.auditPage')],
   ['print stylesheet is loaded', files.main.includes("'./print.css'")],
@@ -105,7 +109,7 @@ const checks = [
   ['dashboard accessibility semantics are present', files.dashboard.includes('aria-expanded={showAlerts}') && files.dashboard.includes('aria-pressed={filter === key}') && files.dashboard.includes('role="alert"')],
 ];
 
-if (checks.length !== 72) {
+if (checks.length !== 76) {
   console.error(`RTL/UI/accountability contract definition must contain exactly 72 checks, found ${checks.length}`);
   process.exit(1);
 }
