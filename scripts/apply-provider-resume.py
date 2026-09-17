@@ -201,7 +201,7 @@ s = p.read_text()
 if "provider unavailability open events can be resumed after restart" not in s:
     marker = "  ['provider unavailability backend checks working window replacement capacity and preserves classification'"
     extra = '''  ['provider unavailability open events can be resumed after restart', t.api.includes("providerUnavailabilityOpen:()=>authed<ProviderUnavailabilityEvent[]>('provider_unavailability_list_open')") && files.providerUnavailability.includes('حالات تعذّر مفتوحة تحتاج استكمال') && t.providerUnavailability.includes('resumeEvent(item)')],
-  ['provider unavailability backend exposes authenticated open-event listing', t.providerRust.includes('pub fn list_open_events') && files.runtime.includes('provider_unavailability_list_open')],
+  ['provider unavailability backend exposes authenticated open-event listing', t.providerRust.includes('pubfnlist_open_events') && files.runtime.includes('provider_unavailability_list_open')],
 '''
     if marker not in s:
         raise SystemExit("marker missing: provider backend contract")
