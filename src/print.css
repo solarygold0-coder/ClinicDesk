@@ -1,0 +1,48 @@
+.printOnly{display:none}
+.attachmentHint{margin:8px 0 14px;color:#687783;font-size:13px}
+.attachmentHeader{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.attachmentHeader h3{display:flex;align-items:center;gap:8px;margin:0}
+.attachmentHeader>div{display:flex;gap:8px}
+.attachmentList{display:grid;gap:8px}
+.attachmentItem{display:flex;align-items:center;gap:9px;border:1px solid #e3e8ed;border-radius:10px;padding:9px 11px;background:#fff}
+.attachmentItem>svg{width:18px;flex:none;color:#71808d}
+.attachmentItem>button{border:0;background:transparent;cursor:pointer}
+.attachmentOpen{min-width:0;flex:1;display:flex;align-items:center;justify-content:space-between;text-align:start;color:inherit}
+.attachmentOpen>span{min-width:0;display:grid;gap:3px}
+.attachmentOpen strong{overflow-wrap:anywhere}
+.attachmentOpen small{color:#71808d}
+.printHeader{border-block-end:2px solid #222;padding-block-end:10px;margin-block-end:16px}
+.printHeader h1{font-size:22px;margin:0 0 6px}
+.printHeader p{margin:0}
+
+@media print{
+ @page{size:A4 portrait;margin:12mm}
+ html,body,#root{background:#fff!important;color:#000!important;direction:rtl!important;min-height:0!important}
+ body{font-family:"Segoe UI",Tahoma,Arial,sans-serif!important;font-size:10.5pt!important}
+ body *{visibility:hidden!important}
+ .print-scope,.print-scope *{visibility:visible!important}
+ .print-scope{position:absolute!important;inset:0!important;width:100%!important;max-width:none!important;max-height:none!important;min-height:0!important;overflow:visible!important;margin:0!important;padding:0!important;background:#fff!important;border:0!important;border-radius:0!important;box-shadow:none!important}
+ .modalBackdrop{position:static!important;inset:auto!important;display:block!important;background:none!important}
+ .printOnly{display:block!important}
+ .noPrint,.print-scope button,.print-scope select,.print-scope input,.print-scope textarea{display:none!important}
+ .pageTitle,.appointmentToolbar{display:none!important}
+ .tableCard,.recordSummary,.recordGrid>article,.patientHistory article,.attachmentItem{background:#fff!important;border-color:#bbb!important;border-radius:0!important;box-shadow:none!important;break-inside:avoid}
+ .printTableCard{overflow:visible!important;min-height:0!important}
+ table{width:100%!important;border-collapse:collapse!important;table-layout:auto!important}
+ thead{display:table-header-group!important}
+ tr{break-inside:avoid!important}
+ th,td{padding:7px 8px!important;border:1px solid #bbb!important;color:#000!important;background:#fff!important;text-align:right!important}
+ th{font-weight:700!important}
+ .status{padding:0!important;background:none!important;color:#000!important;border:0!important;font-weight:600!important}
+ .patientRecord .modalHead{padding:0 0 10px!important;margin-block-end:12px!important;border-block-end:1px solid #bbb!important}
+ .patientRecord .recordGrid{grid-template-columns:1fr 1fr!important;padding:0!important;margin-block-end:12px!important;gap:8px!important}
+ .patientRecord .recordSummary{margin:0 0 10px!important;padding:9px 10px!important;white-space:pre-wrap!important}
+ .patientRecord .patientHistory{margin:0!important;padding-block-start:8px!important}
+ .patientHistory article{grid-template-columns:auto 1fr auto!important;padding:7px 8px!important}
+ .attachmentHint{display:none!important}
+ .attachmentItem{padding:6px 8px!important}
+ .attachmentOpen{display:flex!important}
+ .attachmentOpen svg{display:none!important}
+ a{color:#000!important;text-decoration:none!important}
+ bdi,[dir="ltr"],.ltr{direction:ltr!important;unicode-bidi:isolate!important}
+}
