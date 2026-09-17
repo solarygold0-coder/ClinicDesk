@@ -27,6 +27,15 @@ jobs:
         run: python scripts/apply-provider-resume.py
       - name: Format Rust
         run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
+      - name: Correct behavior-based resume contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/ui-contract.mjs')
+          s = p.read_text()
+          s = s.replace("t.providerRust.includes('pub fn list_open_events')", "files.providerRust.includes('pub fn list_open_events')")
+          p.write_text(s)
+          PY
       - name: Validate UI and TypeScript
         run: |
           npm install --ignore-scripts
