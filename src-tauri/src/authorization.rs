@@ -105,10 +105,7 @@ fn deputy_restore_granted_unchecked(db: &Connection) -> Result<bool, String> {
     explicit_role_grant(db, DEPUTY_ROLE, BACKUP_RESTORE)
 }
 
-pub fn deputy_restore_granted(
-    db: &Connection,
-    actor_token: Option<&str>,
-) -> Result<bool, String> {
+pub fn deputy_restore_granted(db: &Connection, actor_token: Option<&str>) -> Result<bool, String> {
     authorize(db, actor_token, SECURITY_MANAGE)?;
     deputy_restore_granted_unchecked(db)
 }
