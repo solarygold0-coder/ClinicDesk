@@ -5,5 +5,5 @@
   "identifier":"sa.clinicdesk.desktop",
   "build":{"beforeDevCommand":"npm run dev","devUrl":"http://localhost:1420","beforeBuildCommand":"npm run build","frontendDist":"../dist"},
   "app":{"windows":[{"title":"ClinicDesk - سجلات المرضى","width":1360,"height":850,"minWidth":1000,"minHeight":650,"center":true}],"security":{"csp":null}},
-  "bundle":{"active":true,"targets":"all","icon":["icons/icon.ico"]}
+  "bundle":{"active":true,"targets":"all","icon":["icons/icon.ico"],"windows":{"webviewInstallMode":{"type":"embedBootstrapper","silent":true}}}
 }
