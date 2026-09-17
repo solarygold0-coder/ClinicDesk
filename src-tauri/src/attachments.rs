@@ -10,8 +10,8 @@ use uuid::Uuid;
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ACTIVE_ATTACHMENTS: i64 = 20;
 const BLOCKED_EXTENSIONS: &[&str] = &[
-    "exe", "com", "bat", "cmd", "msi", "msp", "scr", "ps1", "psm1", "vbs", "vbe", "js",
-    "jse", "wsf", "wsh", "hta", "lnk", "url", "reg", "dll", "sys", "cpl", "jar",
+    "exe", "com", "bat", "cmd", "msi", "msp", "scr", "ps1", "psm1", "vbs", "vbe", "js", "jse",
+    "wsf", "wsh", "hta", "lnk", "url", "reg", "dll", "sys", "cpl", "jar",
 ];
 
 #[derive(Debug, Serialize)]
@@ -53,7 +53,8 @@ pub fn list(conn: &Connection, patient_id: i64) -> Result<Vec<Attachment>, Strin
             })
         })
         .map_err(|e| e.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
 }
 
 fn ensure_patient(conn: &Connection, patient_id: i64) -> Result<(), String> {
@@ -64,7 +65,11 @@ fn ensure_patient(conn: &Connection, patient_id: i64) -> Result<(), String> {
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    if exists == 0 { Err("ملف المريض غير موجود".into()) } else { Ok(()) }
+    if exists == 0 {
+        Err("ملف المريض غير موجود".into())
+    } else {
+        Ok(())
+    }
 }
 
 fn extension(path: &Path) -> Result<String, String> {
@@ -121,7 +126,12 @@ fn active_count(conn: &Connection, patient_id: i64) -> Result<i64, String> {
     .map_err(|e| e.to_string())
 }
 
-pub fn import_file(conn: &Connection, patient_id: i64, source: &Path, root: &Path) -> Result<i64, String> {
+pub fn import_file(
+    conn: &Connection,
+    patient_id: i64,
+    source: &Path,
+    root: &Path,
+) -> Result<i64, String> {
     import_file_named(conn, patient_id, source, root, None, None)
 }
 
@@ -172,17 +182,52 @@ pub fn import_file_named(
         &sha256,
     ) {
         Ok(id) => Ok(id),
-        Err(e) => { let _ = fs::remove_file(&destination); Err(e) }
+        Err(e) => {
+            let _ = fs::remove_file(&destination);
+            Err(e)
+        }
     }
 }
 
-pub fn add(conn: &Connection, patient_id: i64, stored_name: &str, original_name: &str, mime_type: Option<&str>, size_bytes: i64, sha256: &str) -> Result<i64, String> {
-    add_named(conn, patient_id, stored_name, original_name, original_name, None, mime_type, size_bytes, sha256)
+pub fn add(
+    conn: &Connection,
+    patient_id: i64,
+    stored_name: &str,
+    original_name: &str,
+    mime_type: Option<&str>,
+    size_bytes: i64,
+    sha256: &str,
+) -> Result<i64, String> {
+    add_named(
+        conn,
+        patient_id,
+        stored_name,
+        original_name,
+        original_name,
+        None,
+        mime_type,
+        size_bytes,
+        sha256,
+    )
 }
 
-pub fn add_named(conn: &Connection, patient_id: i64, stored_name: &str, original_name: &str, display_name: &str, category: Option<&str>, mime_type: Option<&str>, size_bytes: i64, sha256: &str) -> Result<i64, String> {
+pub fn add_named(
+    conn: &Connection,
+    patient_id: i64,
+    stored_name: &str,
+    original_name: &str,
+    display_name: &str,
+    category: Option<&str>,
+    mime_type: Option<&str>,
+    size_bytes: i64,
+    sha256: &str,
+) -> Result<i64, String> {
     let label = validate_label(display_name, "اسم المرفق")?;
-    if original_name.trim().is_empty() || safe_stored_path(Path::new("."), stored_name).is_err() || sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if original_name.trim().is_empty()
+        || safe_stored_path(Path::new("."), stored_name).is_err()
+        || sha256.len() != 64
+        || !sha256.bytes().all(|b| b.is_ascii_hexdigit())
+    {
         return Err("بيانات المرفق غير صالحة".into());
     }
     if size_bytes <= 0 || size_bytes > MAX_ATTACHMENT_BYTES as i64 {
@@ -196,7 +241,9 @@ pub fn add_named(conn: &Connection, patient_id: i64, stored_name: &str, original
     tx.execute("INSERT INTO attachments(patient_id,stored_name,original_name,display_name,category,mime_type,size_bytes,sha256) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", params![patient_id,stored_name,original_name,label,category,mime_type,size_bytes,sha256])
         .map_err(|e| if e.to_string().contains("attachment_limit_20") { "الحد الأقصى للمرفقات النشطة للمريض هو 20 مرفقاً".to_string() } else { e.to_string() })?;
     let id = tx.last_insert_rowid();
-    let details = serde_json::json!({"attachmentId":id,"displayName":display_name,"category":category}).to_string();
+    let details =
+        serde_json::json!({"attachmentId":id,"displayName":display_name,"category":category})
+            .to_string();
     tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_added','patient',?1,?2)", params![patient_id,details]).map_err(|e|e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(id)
@@ -205,8 +252,18 @@ pub fn add_named(conn: &Connection, patient_id: i64, stored_name: &str, original
 pub fn archive(conn: &Connection, id: i64, reason: &str) -> Result<(), String> {
     let reason = validate_label(reason, "سبب الأرشفة")?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    let patient_id: i64 = tx.query_row("SELECT patient_id FROM attachments WHERE id=?1 AND deleted_at IS NULL", params![id], |r| r.get(0)).map_err(|_|"المرفق غير موجود أو مؤرشف مسبقاً".to_string())?;
-    tx.execute("UPDATE attachments SET deleted_at=CURRENT_TIMESTAMP,deleted_reason=?2 WHERE id=?1", params![id,reason]).map_err(|e|e.to_string())?;
+    let patient_id: i64 = tx
+        .query_row(
+            "SELECT patient_id FROM attachments WHERE id=?1 AND deleted_at IS NULL",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "المرفق غير موجود أو مؤرشف مسبقاً".to_string())?;
+    tx.execute(
+        "UPDATE attachments SET deleted_at=CURRENT_TIMESTAMP,deleted_reason=?2 WHERE id=?1",
+        params![id, reason],
+    )
+    .map_err(|e| e.to_string())?;
     let details = serde_json::json!({"attachmentId":id,"reason":reason}).to_string();
     tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_archived','patient',?1,?2)", params![patient_id,details]).map_err(|e|e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
@@ -216,10 +273,28 @@ pub fn archive(conn: &Connection, id: i64, reason: &str) -> Result<(), String> {
 pub fn restore(conn: &Connection, id: i64, reason: &str) -> Result<(), String> {
     let reason = validate_label(reason, "سبب الاستعادة")?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    let patient_id: i64 = tx.query_row("SELECT patient_id FROM attachments WHERE id=?1 AND deleted_at IS NOT NULL", params![id], |r| r.get(0)).map_err(|_|"المرفق غير موجود أو غير مؤرشف".to_string())?;
-    let count: i64 = tx.query_row("SELECT COUNT(*) FROM attachments WHERE patient_id=?1 AND deleted_at IS NULL", params![patient_id], |r| r.get(0)).map_err(|e|e.to_string())?;
-    if count >= MAX_ACTIVE_ATTACHMENTS { return Err("لا يمكن الاستعادة: المريض لديه 20 مرفقاً نشطاً".into()); }
-    tx.execute("UPDATE attachments SET deleted_at=NULL,deleted_reason=NULL WHERE id=?1", params![id]).map_err(|e|e.to_string())?;
+    let patient_id: i64 = tx
+        .query_row(
+            "SELECT patient_id FROM attachments WHERE id=?1 AND deleted_at IS NOT NULL",
+            params![id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "المرفق غير موجود أو غير مؤرشف".to_string())?;
+    let count: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM attachments WHERE patient_id=?1 AND deleted_at IS NULL",
+            params![patient_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if count >= MAX_ACTIVE_ATTACHMENTS {
+        return Err("لا يمكن الاستعادة: المريض لديه 20 مرفقاً نشطاً".into());
+    }
+    tx.execute(
+        "UPDATE attachments SET deleted_at=NULL,deleted_reason=NULL WHERE id=?1",
+        params![id],
+    )
+    .map_err(|e| e.to_string())?;
     let details = serde_json::json!({"attachmentId":id,"reason":reason}).to_string();
     tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_restored','patient',?1,?2)", params![patient_id,details]).map_err(|e|e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
@@ -232,16 +307,33 @@ mod tests {
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(include_str!("../migrations/001_init.sql")).unwrap();
-        conn.execute_batch(include_str!("../migrations/014_attachment_lifecycle.sql")).unwrap();
-        conn.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", []).unwrap();
+        conn.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        conn.execute_batch(include_str!("../migrations/014_attachment_lifecycle.sql"))
+            .unwrap();
+        conn.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+            [],
+        )
+        .unwrap();
         conn
     }
 
     #[test]
     fn lifecycle_preserves_metadata() {
         let conn = db();
-        let id = add_named(&conn, 1, "a.pdf", "a.pdf", "تحليل", Some("مختبر"), Some("application/pdf"), 10, &"a".repeat(64)).unwrap();
+        let id = add_named(
+            &conn,
+            1,
+            "a.pdf",
+            "a.pdf",
+            "تحليل",
+            Some("مختبر"),
+            Some("application/pdf"),
+            10,
+            &"a".repeat(64),
+        )
+        .unwrap();
         assert_eq!(list(&conn, 1).unwrap()[0].display_name, "تحليل");
         archive(&conn, id, "انتهت الحاجة").unwrap();
         assert!(list(&conn, 1).unwrap().is_empty());
@@ -252,7 +344,18 @@ mod tests {
     #[test]
     fn enforces_twenty_active_attachments() {
         let conn = db();
-        for i in 0..20 { add(&conn, 1, &format!("{i}.pdf"), "x.pdf", None, 1, &"a".repeat(64)).unwrap(); }
+        for i in 0..20 {
+            add(
+                &conn,
+                1,
+                &format!("{i}.pdf"),
+                "x.pdf",
+                None,
+                1,
+                &"a".repeat(64),
+            )
+            .unwrap();
+        }
         assert!(add(&conn, 1, "20.pdf", "x.pdf", None, 1, &"a".repeat(64)).is_err());
     }
 
@@ -260,9 +363,29 @@ mod tests {
     fn archive_frees_slot_but_restore_respects_limit() {
         let conn = db();
         let first = add(&conn, 1, "first.pdf", "x.pdf", None, 1, &"a".repeat(64)).unwrap();
-        for i in 1..20 { add(&conn, 1, &format!("{i}.pdf"), "x.pdf", None, 1, &"a".repeat(64)).unwrap(); }
+        for i in 1..20 {
+            add(
+                &conn,
+                1,
+                &format!("{i}.pdf"),
+                "x.pdf",
+                None,
+                1,
+                &"a".repeat(64),
+            )
+            .unwrap();
+        }
         archive(&conn, first, "أرشفة").unwrap();
-        add(&conn, 1, "replacement.pdf", "x.pdf", None, 1, &"a".repeat(64)).unwrap();
+        add(
+            &conn,
+            1,
+            "replacement.pdf",
+            "x.pdf",
+            None,
+            1,
+            &"a".repeat(64),
+        )
+        .unwrap();
         assert!(restore(&conn, first, "محاولة استعادة").is_err());
     }
 
