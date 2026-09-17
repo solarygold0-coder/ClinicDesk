@@ -118,7 +118,10 @@ fn database_rejects_restore_that_would_exceed_twenty_active_attachments() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(active, 20, "fixture must contain exactly 20 active attachments");
+    assert_eq!(
+        active, 20,
+        "fixture must contain exactly 20 active attachments"
+    );
     let error = db
         .execute(
             "UPDATE attachments SET deleted_at=NULL,deleted_reason=NULL WHERE id=?1",
@@ -133,5 +136,8 @@ fn database_rejects_restore_that_would_exceed_twenty_active_attachments() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(still_archived, 1, "failed restore must preserve archived state");
+    assert_eq!(
+        still_archived, 1,
+        "failed restore must preserve archived state"
+    );
 }
