@@ -46,6 +46,16 @@ jobs:
       - run: npm install --ignore-scripts
       - run: npx tsc --noEmit
 
+  frontend-ui-contract:
+    name: RTL UI contract (50 checks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run test:ui-contract
+
   frontend-production-bundle:
     name: Frontend production bundle
     runs-on: windows-latest
@@ -254,6 +264,7 @@ jobs:
       - frontend-build
       - frontend-dependency-resolution
       - frontend-typescript
+      - frontend-ui-contract
       - frontend-production-bundle
       - windows-package
       - rust-check
@@ -281,6 +292,7 @@ jobs:
             ${{ needs.frontend-build.result }}
             ${{ needs.frontend-dependency-resolution.result }}
             ${{ needs.frontend-typescript.result }}
+            ${{ needs.frontend-ui-contract.result }}
             ${{ needs.frontend-production-bundle.result }}
             ${{ needs.windows-package.result }}
             ${{ needs.rust-check.result }}
