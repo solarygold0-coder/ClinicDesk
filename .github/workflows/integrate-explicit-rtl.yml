@@ -1,0 +1,100 @@
+name: Integrate explicit RTL surfaces
+
+on:
+  push:
+    branches: [tauri-react-rebuild]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: integrate-explicit-rtl
+  cancel-in-progress: true
+
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+          fetch-depth: 0
+      - name: Make operational RTL surfaces explicit
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              if new in text:
+                  return
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one RTL anchor, found {count}: {old}')
+              p.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          replace_once(
+              'src/PatientsPage.tsx',
+              '<section className="page" aria-busy={busy}>',
+              '<section className="page patientsPage" dir="rtl" aria-busy={busy}>',
+          )
+          replace_once(
+              'src/PatientsPage.tsx',
+              '<div className="modal patientRecord print-scope" role="dialog"',
+              '<div className="modal patientRecord print-scope" dir="rtl" role="dialog"',
+          )
+          replace_once(
+              'src/PatientsPage.tsx',
+              '<form className="modal" onSubmit={submit} role="dialog"',
+              '<form className="modal" dir="rtl" onSubmit={submit} role="dialog"',
+          )
+          replace_once(
+              'src/AppointmentsPage.tsx',
+              '<section className="page appointmentsPage print-scope" aria-busy={busy || statusBusyId !== null}>',
+              '<section className="page appointmentsPage print-scope" dir="rtl" aria-busy={busy || statusBusyId !== null}>',
+          )
+          replace_once(
+              'src/AppointmentsPage.tsx',
+              '<form className="modal" onSubmit={submit} role="dialog"',
+              '<form className="modal" dir="rtl" onSubmit={submit} role="dialog"',
+          )
+          replace_once(
+              'src/DirectoryPage.tsx',
+              '<section className="page" aria-busy={busy}>',
+              '<section className="page directoryPage" dir="rtl" aria-busy={busy}>',
+          )
+
+          rtl = Path('src/rtl.css')
+          css = rtl.read_text(encoding='utf-8')
+          block = '''\n/* Operational surfaces own their RTL context instead of relying only on ancestor inheritance. */\n.modal,\n.modalHead,\n.formGrid,\n.modalActions,\n.pageTitle,\n.tableCard,\n.directoryGrid,\n.settingsGrid,\n.card,\n.attachmentHeader,\n.attachmentList,\n.attachmentItem,\n.providerUnavailabilityPage {\n  direction: rtl;\n  text-align: start;\n}\n'''
+          if 'Operational surfaces own their RTL context' not in css:
+              rtl.write_text(css.rstrip() + '\n' + block, encoding='utf-8')
+
+          contract = Path('scripts/ui-contract.mjs')
+          text = contract.read_text(encoding='utf-8')
+          anchor = "  ['UI hardening stylesheet is loaded', files.main.includes(\"'./ui-fixes.css'\")],"
+          additions = '''  ['operational page roots own explicit RTL direction', t.patients.includes('<sectionclassName="pagepatientsPage"dir="rtl"') && t.appointments.includes('<sectionclassName="pageappointmentsPageprint-scope"dir="rtl"') && t.directory.includes('<sectionclassName="pagedirectoryPage"dir="rtl"') && t.users.includes('<sectionclassName="pageusersPage"dir="rtl"') && t.audit.includes('<sectionclassName="pageauditPage"dir="rtl"') && t.scheduling.includes('<sectionclassName="pageschedulingPage"dir="rtl"') && t.readOnlyAppointments.includes('<sectionclassName="pageappointmentsPageprint-scope"dir="rtl"') && t.providerUnavailability.includes('<sectionclassName="pageproviderUnavailabilityPage"dir="rtl"')],\n  ['patient and appointment dialogs own explicit RTL direction', t.patients.includes('className="modalpatientRecordprint-scope"dir="rtl"role="dialog"') && t.patients.includes('className="modal"dir="rtl"onSubmit={submit}role="dialog"') && t.appointments.includes('className="modal"dir="rtl"onSubmit={submit}role="dialog"')],\n  ['authentication and attachments keep RTL roots with isolated LTR fields', t.auth.includes('className="authShell"dir="rtl"') && t.attachments.includes('className="recordSummary"dir="rtl"') && files.auth.includes('dir="ltr"') && files.attachments.includes('<bdi>')],\n  ['RTL stylesheet independently hardens dialogs forms cards and data surfaces', t.rtl.includes('.modal,.modalHead,.formGrid,.modalActions,.pageTitle,.tableCard,.directoryGrid,.settingsGrid,.card,.attachmentHeader,.attachmentList,.attachmentItem,.providerUnavailabilityPage{direction:rtl;text-align:start;}')],\n'''
+          if 'operational page roots own explicit RTL direction' not in text:
+              if anchor not in text:
+                  raise SystemExit('UI contract RTL insertion anchor missing')
+              text = text.replace(anchor, additions + anchor, 1)
+              text = text.replace('if (checks.length !== 72)', 'if (checks.length !== 76)', 1)
+          contract.write_text(text, encoding='utf-8')
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify RTL contract before commit
+        run: node scripts/ui-contract.mjs
+      - name: Remove one-time workflow
+        run: git rm .github/workflows/integrate-explicit-rtl.yml
+      - name: Commit RTL hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/PatientsPage.tsx src/AppointmentsPage.tsx src/DirectoryPage.tsx src/rtl.css scripts/ui-contract.mjs
+          git diff --cached --check
+          git commit -m "Make operational RTL surfaces explicit"
+          git push origin HEAD:tauri-react-rebuild
