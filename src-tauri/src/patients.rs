@@ -126,7 +126,11 @@ pub fn create(conn: &mut Connection, input: PatientInput) -> Result<Patient, Str
         Some(id),
         None,
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: None, after_json: Some(&after_json), reason: None },
+        &audit::AuditChange {
+            before_json: None,
+            after_json: Some(&after_json),
+            reason: None,
+        },
     )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(created)
@@ -190,7 +194,11 @@ pub fn update(conn: &Connection, id: i64, input: PatientInput) -> Result<Patient
         Some(id),
         None,
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: None },
+        &audit::AuditChange {
+            before_json: Some(&before_json),
+            after_json: Some(&after_json),
+            reason: None,
+        },
     )?;
     Ok(after)
 }
@@ -223,7 +231,11 @@ pub fn soft_delete(conn: &Connection, id: i64) -> Result<(), String> {
         Some(id),
         None,
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: Some("patient_archived") },
+        &audit::AuditChange {
+            before_json: Some(&before_json),
+            after_json: Some(&after_json),
+            reason: Some("patient_archived"),
+        },
     )?;
     Ok(())
 }
