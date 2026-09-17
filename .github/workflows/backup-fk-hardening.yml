@@ -16,6 +16,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+      - name: Provide generated test icon required by Tauri context
+        run: |
+          mkdir -p src-tauri/icons
+          base64 -d > src-tauri/icons/icon.png <<'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=
+          EOF
       - name: Add foreign key verification and regression test
         shell: python
         run: |
