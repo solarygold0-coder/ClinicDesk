@@ -390,30 +390,34 @@ pub fn affected_appointments(
         .map_err(|e| e.to_string())
 }
 
+struct ActionRecordDetails<'a> {
+    action_type: &'a str,
+    replacement_doctor_id: Option<i64>,
+    new_starts_at: Option<&'a str>,
+    replacement_appointment_id: Option<i64>,
+}
+
 fn record_action(
     c: &Connection,
     event: &ProviderUnavailabilityEvent,
     before: &AppointmentSnapshot,
     after: &AppointmentSnapshot,
-    action_type: &str,
-    replacement_doctor_id: Option<i64>,
-    new_starts_at: Option<&str>,
-    replacement_appointment_id: Option<i64>,
+    details: ActionRecordDetails<'_>,
 ) -> Result<(), String> {
     c.execute(
         "INSERT INTO provider_unavailability_actions(
-            event_id,appointment_id,action_type,original_doctor_id,replacement_doctor_id,
-            original_starts_at,new_starts_at,replacement_appointment_id,reason_code,reason_note
+            event_id,appointment_id,details.action_type,original_doctor_id,details.replacement_doctor_id,
+            original_starts_at,details.new_starts_at,details.replacement_appointment_id,reason_code,reason_note
          ) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
         params![
             event.id,
             before.id,
-            action_type,
+            details.action_type,
             before.doctor_id,
-            replacement_doctor_id,
+            details.replacement_doctor_id,
             before.starts_at,
-            new_starts_at,
-            replacement_appointment_id,
+            details.new_starts_at,
+            details.replacement_appointment_id,
             event.reason_code,
             event.reason_note,
         ],
@@ -423,18 +427,18 @@ fn record_action(
     let after_json = snapshot_json(after);
     let details = serde_json::json!({
         "eventId": event.id,
-        "action": action_type,
+        "action": details.action_type,
         "originalDoctorId": before.doctor_id,
-        "replacementDoctorId": replacement_doctor_id,
+        "replacementDoctorId": details.replacement_doctor_id,
         "oldStartsAt": before.starts_at,
-        "newStartsAt": new_starts_at,
-        "replacementAppointmentId": replacement_appointment_id,
+        "newStartsAt": details.new_starts_at,
+        "replacementAppointmentId": details.replacement_appointment_id,
     })
     .to_string();
     let reason = event.reason_note.as_deref().unwrap_or(&event.reason_code);
     audit::record_as(
         c,
-        &format!("provider_unavailability_{action_type}"),
+        &format!("provider_unavailability_{details.action_type}"),
         "appointment",
         Some(before.id),
         Some(&details),
@@ -484,10 +488,12 @@ fn transfer(
         event,
         &before,
         &after,
-        "transfer",
-        Some(replacement_doctor_id),
-        Some(&after.starts_at),
-        None,
+        ActionRecordDetails {
+            action_type: "transfer",
+            replacement_doctor_id: Some(replacement_doctor_id),
+            new_starts_at: Some(&after.starts_at),
+            replacement_appointment_id: None,
+        },
     )
 }
 
@@ -507,7 +513,18 @@ fn cancel(
     )
     .map_err(|e| e.to_string())?;
     let after = appointment_snapshot(c, appointment_id)?;
-    record_action(c, event, &before, &after, "cancel", None, None, None)
+    record_action(
+        c,
+        event,
+        &before,
+        &after,
+        ActionRecordDetails {
+            action_type: "cancel",
+            replacement_doctor_id: None,
+            new_starts_at: None,
+            replacement_appointment_id: None,
+        },
+    )
 }
 
 fn reschedule(
@@ -578,10 +595,12 @@ fn reschedule(
         event,
         &before,
         &after,
-        "reschedule",
-        Some(target_doctor),
-        Some(&new_start_text),
-        Some(replacement_id),
+        ActionRecordDetails {
+            action_type: "reschedule",
+            replacement_doctor_id: Some(target_doctor),
+            new_starts_at: Some(&new_start_text),
+            replacement_appointment_id: Some(replacement_id),
+        },
     )?;
     let replacement = appointment_snapshot(c, replacement_id)?;
     let replacement_after = snapshot_json(&replacement);
