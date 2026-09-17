@@ -30,3 +30,5 @@ jobs:
         run: node scripts/appointment-advisory-contract.mjs
       - name: Verify silent two-day appointment reminder
         run: node scripts/two-day-reminder-contract.mjs
+      - name: Verify canonical full Gregorian date display
+        run: node scripts/full-date-display-contract.mjs
