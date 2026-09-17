@@ -28,3 +28,5 @@ jobs:
         run: node scripts/audit-label-contract.mjs
       - name: Verify smart appointment scheduling advisories
         run: node scripts/appointment-advisory-contract.mjs
+      - name: Verify silent two-day appointment reminder
+        run: node scripts/two-day-reminder-contract.mjs
