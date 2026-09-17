@@ -24,6 +24,16 @@ jobs:
           components: rustfmt
       - name: Apply user-visible integration
         run: python scripts/apply-visible-feature-integration.py
+      - name: Normalize generated visible feature contract
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/visible-feature-contract.mjs')
+          s=p.read_text()
+          if '\\n' not in s:
+              raise SystemExit('generated visible contract did not contain escaped newlines')
+          p.write_text(s.replace('\\n','\n'))
+          PY
       - name: Align attachment contract with secure backend opener
         run: |
           python - <<'PY'
