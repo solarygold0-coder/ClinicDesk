@@ -56,6 +56,13 @@ pub fn verify_database(path: &Path, expected_schema: i64) -> Result<(), String> 
     if integrity != "ok" {
         return Err("فشل فحص سلامة قاعدة البيانات".into());
     }
+    let mut fk_check = db
+        .prepare("PRAGMA foreign_key_check")
+        .map_err(|e| e.to_string())?;
+    let mut fk_rows = fk_check.query([]).map_err(|e| e.to_string())?;
+    if fk_rows.next().map_err(|e| e.to_string())?.is_some() {
+        return Err("فشل فحص العلاقات المرجعية في قاعدة البيانات".into());
+    }
     let schema: i64 = db
         .query_row(
             "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
@@ -493,6 +500,32 @@ mod tests {
         drop(current);
         let _ = fs::remove_file(live);
         let _ = fs::remove_file(source);
+    }
+
+    #[test]
+    fn rejects_database_with_broken_foreign_keys() {
+        let path = temp("broken-foreign-key");
+        let conn = Connection::open(&path).unwrap();
+        super::super::migrate_db(&conn).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=OFF;").unwrap();
+        conn.execute(
+            "INSERT INTO appointments(patient_id,starts_at,ends_at,status) VALUES(999999,'2026-09-17T10:00:00','2026-09-17T10:30:00','scheduled')",
+            [],
+        )
+        .unwrap();
+        let violations: i64 = conn
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(
+            violations > 0,
+            "test fixture must contain a real FK violation"
+        );
+        drop(conn);
+        let result = verify_database(&path, super::super::LATEST_SCHEMA_VERSION);
+        assert!(result.is_err());
+        let _ = fs::remove_file(path);
     }
 
     #[test]
