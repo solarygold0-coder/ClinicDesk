@@ -125,7 +125,7 @@ pub fn create_user(
 ) -> Result<UserSummary, String> {
     let role = valid_role(role_type.trim())?.to_string();
     let password_hash = hash_password(&password)?;
-    let created = users::create(
+    let created = users::create_with_role(
         db,
         users::NewUserAccount {
             username,
@@ -133,19 +133,8 @@ pub fn create_user(
             password_hash,
             is_system_admin: Some(is_admin_role(&role)),
         },
+        &role,
     )?;
-    db.execute(
-        "UPDATE users SET role_type=?2,is_system_admin=?3 WHERE id=?1",
-        params![created.id, role, is_admin_role(&role) as i64],
-    )
-    .map_err(|e| {
-        let text = e.to_string();
-        if text.contains("role_limit_") {
-            "تم بلوغ الحد الأقصى لهذا الدور الوظيفي".to_string()
-        } else {
-            text
-        }
-    })?;
     summary_by_id(db, created.id)
 }
 
