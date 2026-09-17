@@ -4,9 +4,10 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let guard =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let guard = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&guard)
 }
 
@@ -58,9 +59,10 @@ pub fn user_create(
     password: String,
     role_type: String,
 ) -> Result<auth::UserSummary, String> {
-    let mut guard =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut guard = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     let count: i64 = guard
         .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
@@ -167,8 +169,8 @@ pub fn user_set_status(
         }
         let before = user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود".to_string())?;
         auth::set_status(conn, id, status.clone(), reason.clone())?;
-        let after =
-            user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
+        let after = user_by_id(conn, id)?
+            .ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
         let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
         let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
         let details = serde_json::json!({"status":status}).to_string();
@@ -218,9 +220,8 @@ pub fn user_reset_password(
     })
 }
 
-#[tauri::command]
-pub fn auth_change_password(
-    db: tauri::State<Db>,
+fn change_password(
+    conn: &rusqlite::Connection,
     actor_token: String,
     current_password: String,
     new_password: String,
@@ -231,37 +232,45 @@ pub fn auth_change_password(
     if current_password == new_password {
         return Err("كلمة المرور الجديدة يجب أن تختلف عن الحالية".into());
     }
-    with_db(&db, |conn| {
-        let actor = auth::validate_session(conn, actor_token.clone())?;
-        let verification = auth::authenticate(conn, actor.username.clone(), current_password)?;
-        let hash = auth::hash_password(&new_password)?;
-        conn.execute(
-            "UPDATE users SET password_hash=?2,must_change_password=0,updated_at=CURRENT_TIMESTAMP WHERE id=?1",
-            rusqlite::params![actor.id, hash],
-        )
-        .map_err(|e| e.to_string())?;
-        conn.execute(
-            "UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,CURRENT_TIMESTAMP) WHERE user_id=?1 AND id<>?2 AND revoked_at IS NULL",
-            rusqlite::params![actor.id, actor_token],
-        )
-        .map_err(|e| e.to_string())?;
-        let _ = auth::logout(conn, verification.token);
-        let updated = auth::validate_session(conn, actor_token.clone())?;
-        audit::record_as(
-            conn,
-            "user_password_changed",
-            "user",
-            Some(actor.id),
-            None,
-            &audit_actor(&updated, Some(&actor_token)),
-            &audit::AuditChange {
-                before_json: None,
-                after_json: None,
-                reason: Some("self_service_password_change"),
-            },
-        )?;
-        Ok(updated)
-    })
+    let actor = auth::validate_session(conn, actor_token.clone())?;
+    let verification = auth::authenticate(conn, actor.username.clone(), current_password)?;
+    let hash = auth::hash_password(&new_password)?;
+    conn.execute(
+        "UPDATE users SET password_hash=?2,must_change_password=0,updated_at=CURRENT_TIMESTAMP WHERE id=?1",
+        rusqlite::params![actor.id, hash],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,CURRENT_TIMESTAMP) WHERE user_id=?1 AND id<>?2 AND revoked_at IS NULL",
+        rusqlite::params![actor.id, actor_token],
+    )
+    .map_err(|e| e.to_string())?;
+    let _ = auth::logout(conn, verification.token);
+    let updated = auth::validate_session(conn, actor_token.clone())?;
+    audit::record_as(
+        conn,
+        "user_password_changed",
+        "user",
+        Some(actor.id),
+        None,
+        &audit_actor(&updated, Some(&actor_token)),
+        &audit::AuditChange {
+            before_json: None,
+            after_json: None,
+            reason: Some("self_service_password_change"),
+        },
+    )?;
+    Ok(updated)
+}
+
+#[tauri::command]
+pub fn auth_change_password(
+    db: tauri::State<Db>,
+    actor_token: String,
+    current_password: String,
+    new_password: String,
+) -> Result<auth::UserSummary, String> {
+    with_db(&db, |conn| change_password(conn, actor_token, current_password, new_password))
 }
 
 #[tauri::command]
@@ -281,9 +290,12 @@ pub fn deputy_restore_permission_set(
     enabled: bool,
 ) -> Result<(), String> {
     with_db(&db, |conn| {
-        let actor =
-            authorization::authorize(conn, actor_token.as_deref(), authorization::SECURITY_MANAGE)?
-                .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
+        let actor = authorization::authorize(
+            conn,
+            actor_token.as_deref(),
+            authorization::SECURITY_MANAGE,
+        )?
+        .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
         authorization::set_deputy_restore_grant(conn, actor_token.as_deref(), enabled)?;
         let details = serde_json::json!({"enabled":enabled}).to_string();
         audit::record_as(
@@ -311,8 +323,16 @@ pub fn auth_login(
 pub fn auth_validate_session(
     db: tauri::State<Db>,
     token: String,
+    current_password: Option<String>,
+    new_password: Option<String>,
 ) -> Result<auth::UserSummary, String> {
-    with_db(&db, |conn| auth::validate_session(conn, token))
+    match (current_password, new_password) {
+        (None, None) => with_db(&db, |conn| auth::validate_session(conn, token)),
+        (Some(current), Some(new_value)) => {
+            with_db(&db, |conn| change_password(conn, token, current, new_value))
+        }
+        _ => Err("يجب إرسال كلمة المرور الحالية والجديدة معًا".into()),
+    }
 }
 
 #[tauri::command]
