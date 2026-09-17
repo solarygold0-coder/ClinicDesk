@@ -164,7 +164,10 @@ fn role_capability_migration_seeds_roles_without_default_restore_grant() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(restore_grants, 0, "restore must require an explicit later grant");
+    assert_eq!(
+        restore_grants, 0,
+        "restore must require an explicit later grant"
+    );
 
     let architecture: String = db
         .query_row(
