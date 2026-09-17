@@ -27,6 +27,14 @@ fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+pub fn operation_detail(stage: &str, code: &str, sha256: Option<&str>) -> String {
+    let mut value = serde_json::json!({"stage":stage,"code":code});
+    if let Some(hash) = sha256 {
+        value["sha256"] = serde_json::Value::String(hash.to_string());
+    }
+    value.to_string()
+}
+
 fn safe_detail(details: Option<&str>) -> Option<String> {
     details.map(|raw| {
         let mut value = raw.replace('\r', " ").replace('\n', " ").replace('\\', "/");
@@ -105,8 +113,6 @@ pub fn append(
     reference: Option<&str>,
     details: Option<&str>,
 ) -> Result<String, String> {
-    // Verification and append are one critical section. Without this, concurrent backup/restore
-    // events can both point at the same previous hash and silently fork the accountability chain.
     let _guard = APPEND_LOCK
         .get_or_init(|| Mutex::new(()))
         .lock()
@@ -152,8 +158,7 @@ mod tests {
 
     #[test]
     fn events_form_a_hash_chain_and_detect_content_tampering() {
-        let path =
-            std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
         append(&path, "restore", "started", Some("RST-1"), None).unwrap();
         append(&path, "restore", "success", Some("RST-1"), Some("ok")).unwrap();
         assert_ne!(verify(&path).unwrap(), "GENESIS");
@@ -168,8 +173,7 @@ mod tests {
 
     #[test]
     fn detects_deleted_or_reordered_chain_entries() {
-        let path =
-            std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
         append(&path, "restore", "started", Some("RST-2"), None).unwrap();
         append(&path, "restore", "success", Some("RST-2"), None).unwrap();
         let content = fs::read_to_string(&path).unwrap();
@@ -181,48 +185,37 @@ mod tests {
 
     #[test]
     fn redacts_sensitive_details_and_paths() {
-        assert_eq!(
-            safe_detail(Some("password=abc")),
-            Some("تفاصيل حساسة محجوبة".to_string())
-        );
-        assert_eq!(
-            safe_detail(Some("C:/Users/Test/backup.db")),
-            Some("تفاصيل المسار محجوبة".to_string())
-        );
-        assert_eq!(
-            safe_detail(Some("integrity check failed")),
-            Some("integrity check failed".to_string())
-        );
+        assert_eq!(safe_detail(Some("password=abc")), Some("تفاصيل حساسة محجوبة".to_string()));
+        assert_eq!(safe_detail(Some("C:/Users/Test/backup.db")), Some("تفاصيل المسار محجوبة".to_string()));
+        assert_eq!(safe_detail(Some("integrity check failed")), Some("integrity check failed".to_string()));
+    }
+
+    #[test]
+    fn operation_details_are_structured_and_path_free() {
+        let detail = operation_detail("source_verify", "integrity_failed", Some("abc123"));
+        let value: serde_json::Value = serde_json::from_str(&detail).unwrap();
+        assert_eq!(value["stage"], "source_verify");
+        assert_eq!(value["code"], "integrity_failed");
+        assert_eq!(value["sha256"], "abc123");
+        assert!(!detail.contains("/"));
+        assert!(!detail.contains("\\"));
     }
 
     #[test]
     fn concurrent_appends_preserve_one_linear_chain() {
-        let path = Arc::new(std::env::temp_dir().join(format!(
-            "clinicdesk-security-concurrent-{}.jsonl",
-            Uuid::new_v4()
-        )));
+        let path = Arc::new(std::env::temp_dir().join(format!("clinicdesk-security-concurrent-{}.jsonl", Uuid::new_v4())));
         let mut workers = Vec::new();
         for i in 0..12 {
             let path = Arc::clone(&path);
             workers.push(std::thread::spawn(move || {
-                append(
-                    path.as_path(),
-                    "backup",
-                    "started",
-                    Some(&format!("BKP-{i}")),
-                    None,
-                )
-                .unwrap()
+                append(path.as_path(), "backup", "started", Some(&format!("BKP-{i}")), None).unwrap()
             }));
         }
         for worker in workers {
             worker.join().unwrap();
         }
         assert_ne!(verify(path.as_path()).unwrap(), "GENESIS");
-        assert_eq!(
-            fs::read_to_string(path.as_path()).unwrap().lines().count(),
-            12
-        );
+        assert_eq!(fs::read_to_string(path.as_path()).unwrap().lines().count(), 12);
         let _ = fs::remove_file(path.as_path());
     }
 }
