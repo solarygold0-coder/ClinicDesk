@@ -158,7 +158,8 @@ mod tests {
 
     #[test]
     fn events_form_a_hash_chain_and_detect_content_tampering() {
-        let path = std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
         append(&path, "restore", "started", Some("RST-1"), None).unwrap();
         append(&path, "restore", "success", Some("RST-1"), Some("ok")).unwrap();
         assert_ne!(verify(&path).unwrap(), "GENESIS");
@@ -173,7 +174,8 @@ mod tests {
 
     #[test]
     fn detects_deleted_or_reordered_chain_entries() {
-        let path = std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
+        let path =
+            std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
         append(&path, "restore", "started", Some("RST-2"), None).unwrap();
         append(&path, "restore", "success", Some("RST-2"), None).unwrap();
         let content = fs::read_to_string(&path).unwrap();
@@ -185,9 +187,18 @@ mod tests {
 
     #[test]
     fn redacts_sensitive_details_and_paths() {
-        assert_eq!(safe_detail(Some("password=abc")), Some("تفاصيل حساسة محجوبة".to_string()));
-        assert_eq!(safe_detail(Some("C:/Users/Test/backup.db")), Some("تفاصيل المسار محجوبة".to_string()));
-        assert_eq!(safe_detail(Some("integrity check failed")), Some("integrity check failed".to_string()));
+        assert_eq!(
+            safe_detail(Some("password=abc")),
+            Some("تفاصيل حساسة محجوبة".to_string())
+        );
+        assert_eq!(
+            safe_detail(Some("C:/Users/Test/backup.db")),
+            Some("تفاصيل المسار محجوبة".to_string())
+        );
+        assert_eq!(
+            safe_detail(Some("integrity check failed")),
+            Some("integrity check failed".to_string())
+        );
     }
 
     #[test]
@@ -203,19 +214,32 @@ mod tests {
 
     #[test]
     fn concurrent_appends_preserve_one_linear_chain() {
-        let path = Arc::new(std::env::temp_dir().join(format!("clinicdesk-security-concurrent-{}.jsonl", Uuid::new_v4())));
+        let path = Arc::new(std::env::temp_dir().join(format!(
+            "clinicdesk-security-concurrent-{}.jsonl",
+            Uuid::new_v4()
+        )));
         let mut workers = Vec::new();
         for i in 0..12 {
             let path = Arc::clone(&path);
             workers.push(std::thread::spawn(move || {
-                append(path.as_path(), "backup", "started", Some(&format!("BKP-{i}")), None).unwrap()
+                append(
+                    path.as_path(),
+                    "backup",
+                    "started",
+                    Some(&format!("BKP-{i}")),
+                    None,
+                )
+                .unwrap()
             }));
         }
         for worker in workers {
             worker.join().unwrap();
         }
         assert_ne!(verify(path.as_path()).unwrap(), "GENESIS");
-        assert_eq!(fs::read_to_string(path.as_path()).unwrap().lines().count(), 12);
+        assert_eq!(
+            fs::read_to_string(path.as_path()).unwrap().lines().count(),
+            12
+        );
         let _ = fs::remove_file(path.as_path());
     }
 }
