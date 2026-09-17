@@ -1,3 +1,4 @@
+use crate::audit;
 use rusqlite::{params, Connection, OptionalExtension};
 
 /// Defines the only status transitions allowed by the scheduling workflow.
@@ -39,11 +40,23 @@ pub fn set_status(c: &mut Connection, id: i64, to: &str) -> Result<(), String> {
         params![to, id],
     )
     .map_err(|e| e.to_string())?;
-    tx.execute(
-        "INSERT INTO audit_log(event_type,entity_type,entity_id,details_json)VALUES('status','appointment',?1,?2)",
-        params![id, format!("{{\"from\":\"{from}\",\"to\":\"{to}\"}}")],
-    )
-    .map_err(|e| e.to_string())?;
+
+    let before_json = serde_json::json!({"status": from}).to_string();
+    let after_json = serde_json::json!({"status": to}).to_string();
+    let details = serde_json::json!({"from": from, "to": to}).to_string();
+    audit::record_as(
+        &tx,
+        "appointment_status_changed",
+        "appointment",
+        Some(id),
+        Some(&details),
+        &audit::AuditActor::default(),
+        &audit::AuditChange {
+            before_json: Some(&before_json),
+            after_json: Some(&after_json),
+            reason: None,
+        },
+    )?;
     tx.commit().map_err(|e| e.to_string())
 }
 
@@ -56,7 +69,21 @@ mod tests {
         let c = Connection::open_in_memory().unwrap();
         c.execute_batch(
             "CREATE TABLE appointments(id INTEGER PRIMARY KEY,status TEXT NOT NULL,updated_at TEXT);
-             CREATE TABLE audit_log(id INTEGER PRIMARY KEY,event_type TEXT,entity_type TEXT,entity_id INTEGER,details_json TEXT);
+             CREATE TABLE audit_log(
+                id INTEGER PRIMARY KEY,
+                event_type TEXT,
+                entity_type TEXT,
+                entity_id INTEGER,
+                details_json TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                actor_user_id INTEGER,
+                actor_display_name TEXT,
+                actor_employee_code TEXT,
+                actor_session_id TEXT,
+                before_json TEXT,
+                after_json TEXT,
+                reason TEXT
+             );
              INSERT INTO appointments(id,status) VALUES(1,'scheduled');",
         )
         .unwrap();
@@ -107,13 +134,28 @@ mod tests {
             .unwrap();
         let audit_count: i64 = c
             .query_row(
-                "SELECT COUNT(*) FROM audit_log WHERE entity_id=1 AND event_type='status'",
+                "SELECT COUNT(*) FROM audit_log WHERE entity_id=1 AND event_type='appointment_status_changed'",
                 [],
                 |r| r.get(0),
             )
             .unwrap();
         assert_eq!(status, "completed");
         assert_eq!(audit_count, 3);
+    }
+
+    #[test]
+    fn status_audit_captures_before_and_after() {
+        let mut c = db();
+        set_status(&mut c, 1, "arrived").unwrap();
+        let (before, after): (String, String) = c
+            .query_row(
+                "SELECT before_json,after_json FROM audit_log WHERE entity_id=1 ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert!(before.contains("scheduled"));
+        assert!(after.contains("arrived"));
     }
 
     #[test]
