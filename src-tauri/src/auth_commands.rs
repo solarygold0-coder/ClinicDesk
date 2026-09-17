@@ -1,22 +1,13 @@
-use serde::Serialize;
-
 use crate::{audit, auth, authorization, Db};
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuthState {
-    pub requires_setup: bool,
-    pub auth_enabled: bool,
-    pub user_count: i64,
-}
 
 fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let guard =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let guard = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&guard)
 }
 
@@ -43,81 +34,17 @@ fn user_by_id(conn: &rusqlite::Connection, id: i64) -> Result<Option<auth::UserS
 }
 
 #[tauri::command]
-pub fn auth_state(db: tauri::State<Db>) -> Result<AuthState, String> {
-    with_db(&db, |conn| {
-        let user_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
-            .map_err(|e| e.to_string())?;
-        let auth_enabled: i64 = conn
-            .query_row(
-                "SELECT auth_enabled FROM security_settings WHERE id=1",
-                [],
-                |row| row.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(AuthState {
-            requires_setup: user_count == 0,
-            auth_enabled: auth_enabled != 0,
-            user_count,
-        })
-    })
-}
-
-#[tauri::command]
-pub fn auth_bootstrap(
-    db: tauri::State<Db>,
-    username: String,
-    display_name: String,
-    password: String,
-) -> Result<auth::AuthSession, String> {
-    let mut guard =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
-    let count: i64 = guard
-        .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
-        .map_err(|e| e.to_string())?;
-    if count != 0 {
-        return Err("تمت تهيئة المستخدم الأول مسبقًا".into());
-    }
-    let username_for_login = username.trim().to_string();
-    let password_for_login = password.clone();
-    let user = auth::create_user(
-        &mut guard,
-        username,
-        display_name,
-        password,
-        "general_manager".into(),
-    )?;
-    guard
-        .execute(
-            "UPDATE security_settings SET auth_enabled=1,updated_at=CURRENT_TIMESTAMP WHERE id=1",
-            [],
-        )
-        .map_err(|e| e.to_string())?;
-    let session = auth::authenticate(&guard, username_for_login, password_for_login)?;
-    let after = serde_json::to_string(&user).map_err(|e| e.to_string())?;
-    audit::record_as(
-        &guard,
-        "system_bootstrap",
-        "user",
-        Some(user.id),
-        None,
-        &audit_actor(&session.user, Some(&session.token)),
-        &audit::AuditChange {
-            before_json: None,
-            after_json: Some(&after),
-            reason: Some("first_run_setup"),
-        },
-    )?;
-    Ok(session)
-}
-
-#[tauri::command]
 pub fn user_list(
     db: tauri::State<Db>,
     actor_token: Option<String>,
 ) -> Result<Vec<auth::UserSummary>, String> {
     with_db(&db, |conn| {
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
+            .map_err(|e| e.to_string())?;
+        if count == 0 {
+            return Ok(Vec::new());
+        }
         authorize_user_management(conn, actor_token.as_deref())?;
         auth::list_users(conn)
     })
@@ -132,9 +59,47 @@ pub fn user_create(
     password: String,
     role_type: String,
 ) -> Result<auth::UserSummary, String> {
-    let mut guard =
-        db.0.lock()
-            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut guard = db
+        .0
+        .lock()
+        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let count: i64 = guard
+        .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+
+    if count == 0 {
+        if role_type.trim() != "general_manager" {
+            return Err("أول حساب في النظام يجب أن يكون المدير العام".into());
+        }
+        let user = auth::create_user(&mut guard, username, display_name, password, role_type)?;
+        guard
+            .execute(
+                "UPDATE security_settings SET auth_enabled=1,updated_at=CURRENT_TIMESTAMP WHERE id=1",
+                [],
+            )
+            .map_err(|e| e.to_string())?;
+        let after = serde_json::to_string(&user).map_err(|e| e.to_string())?;
+        audit::record_as(
+            &guard,
+            "system_bootstrap",
+            "user",
+            Some(user.id),
+            None,
+            &audit::AuditActor {
+                user_id: Some(user.id),
+                display_name: Some(&user.display_name),
+                employee_code: Some(&user.employee_code),
+                session_id: None,
+            },
+            &audit::AuditChange {
+                before_json: None,
+                after_json: Some(&after),
+                reason: Some("first_run_setup"),
+            },
+        )?;
+        return Ok(user);
+    }
+
     let actor = authorize_user_management(&guard, actor_token.as_deref())?
         .ok_or_else(|| "تسجيل الدخول مطلوب لإدارة المستخدمين".to_string())?;
     let user = auth::create_user(&mut guard, username, display_name, password, role_type)?;
@@ -204,16 +169,17 @@ pub fn user_set_status(
         }
         let before = user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود".to_string())?;
         auth::set_status(conn, id, status.clone(), reason.clone())?;
-        let after =
-            user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
+        let after = user_by_id(conn, id)?
+            .ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
         let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
         let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
+        let details = serde_json::json!({"status":status}).to_string();
         audit::record_as(
             conn,
             "user_status_changed",
             "user",
             Some(id),
-            Some(&serde_json::json!({"status":status}).to_string()),
+            Some(&details),
             &audit_actor(&actor, actor_token.as_deref()),
             &audit::AuditChange {
                 before_json: Some(&before_json),
@@ -268,16 +234,20 @@ pub fn deputy_restore_permission_set(
     enabled: bool,
 ) -> Result<(), String> {
     with_db(&db, |conn| {
-        let actor =
-            authorization::authorize(conn, actor_token.as_deref(), authorization::SECURITY_MANAGE)?
-                .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
+        let actor = authorization::authorize(
+            conn,
+            actor_token.as_deref(),
+            authorization::SECURITY_MANAGE,
+        )?
+        .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
         authorization::set_deputy_restore_grant(conn, actor_token.as_deref(), enabled)?;
+        let details = serde_json::json!({"enabled":enabled}).to_string();
         audit::record_as(
             conn,
             "deputy_restore_permission_changed",
             "security",
             None,
-            Some(&serde_json::json!({"enabled":enabled}).to_string()),
+            Some(&details),
             &audit_actor(&actor, actor_token.as_deref()),
             &audit::AuditChange::default(),
         )
