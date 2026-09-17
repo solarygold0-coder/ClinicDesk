@@ -1,0 +1,51 @@
+name: Critical Runtime Hardening Once
+
+on:
+  push:
+    branches: [tauri-react-rebuild]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: clinicdesk-critical-runtime-hardening
+  cancel-in-progress: true
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply critical runtime fixes
+        run: python scripts/release-hardening-critical.py
+      - name: Format Rust
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
+      - name: Validate frontend and runtime contract
+        run: |
+          npm install --ignore-scripts
+          npm run build
+          node scripts/runtime-hardening-contract.mjs
+      - name: Validate Rust and focused auth/attachment tests
+        run: |
+          cargo check --manifest-path src-tauri/Cargo.toml
+          cargo test --manifest-path src-tauri/Cargo.toml --test auth_gate -- --nocapture
+          cargo test --manifest-path src-tauri/Cargo.toml attachments::tests -- --nocapture
+      - name: Commit verified runtime hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm scripts/release-hardening-critical.py
+          git add src-tauri/src/lib.rs src-tauri/src/auth.rs src-tauri/src/auth_commands.rs src/api.ts src/AuthGate.tsx src/UsersPage.tsx src/PatientAttachments.tsx scripts/runtime-hardening-contract.mjs
+          git commit -m "Fix desktop runtime dialogs attachments and password policy"
+          git pull --rebase origin tauri-react-rebuild
+          git push origin HEAD:tauri-react-rebuild
