@@ -1,0 +1,22 @@
+name: Authentication Gate
+on:
+  push:
+    branches: [tauri-react-rebuild]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: clinicdesk-auth-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  auth-gate:
+    name: Argon2 / sessions / lifecycle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --test auth_gate -- --nocapture
