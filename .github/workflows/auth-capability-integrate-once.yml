@@ -6,7 +6,7 @@ permissions:
   contents: write
 jobs:
   integrate:
-    if: github.event.head_commit.message == 'Retry explicit deputy restore integration'
+    if: github.event.head_commit.message == 'Run explicit deputy restore integration'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +22,7 @@ jobs:
           text = text.replace('const LATEST_SCHEMA_VERSION: i64 = 15;', 'const LATEST_SCHEMA_VERSION: i64 = 16;', 1)
           if '016_role_capability_grants.sql' not in text:
               pattern = re.compile(r'(\(\s*15\s*,\s*include_str!\("\.\./migrations/015_attachment_restore_limit\.sql"\)\s*,\s*\),)')
-              replacement = r'''\1
-        (
-            16,
-            include_str!("../migrations/016_role_capability_grants.sql"),
-        ),'''
+              replacement = '\\1\n        (\n            16,\n            include_str!("../migrations/016_role_capability_grants.sql"),\n        ),'
               text, count = pattern.subn(replacement, text, count=1)
               if count != 1:
                   raise SystemExit('migration 15 marker not found')
