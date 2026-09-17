@@ -23,40 +23,50 @@ use std::{
 };
 use tauri::Manager;
 use uuid::Uuid;
-
-pub const LATEST_SCHEMA_VERSION: i64 = 15;
-
 pub struct Db(pub Mutex<Connection>);
-
-pub fn migrate_db(conn: &Connection) -> Result<(), String> {
-    conn.execute_batch("PRAGMA foreign_keys=ON;")
+const LATEST_SCHEMA_VERSION: i64 = 15;
+fn schema_version(db: &Connection) -> Result<i64, String> {
+    db.query_row(
+        "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+fn migrate_db(db: &Connection) -> Result<(), String> {
+    db.execute_batch(include_str!("../migrations/001_init.sql"))
         .map_err(|e| e.to_string())?;
-    conn.execute_batch(include_str!("../migrations/001_init.sql"))
-        .map_err(|e| e.to_string())?;
-    let mut version: i64 = conn
-        .query_row(
-            "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
-            [],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
-    if version > LATEST_SCHEMA_VERSION {
-        return Err(format!(
-            "إصدار قاعدة البيانات {version} أحدث من الإصدار المدعوم {LATEST_SCHEMA_VERSION}"
-        ));
+    let current = schema_version(db)?;
+    if current > LATEST_SCHEMA_VERSION {
+        return Err(format!("إصدار قاعدة البيانات {current} أحدث من الإصدار الذي يدعمه البرنامج {LATEST_SCHEMA_VERSION}"));
     }
-    let migrations: &[(i64, &str)] = &[
-        (2, include_str!("../migrations/002_indexes.sql")),
-        (3, include_str!("../migrations/003_directory.sql")),
-        (4, include_str!("../migrations/004_scheduling.sql")),
-        (5, include_str!("../migrations/005_audit.sql")),
-        (6, include_str!("../migrations/006_attachments.sql")),
-        (7, include_str!("../migrations/007_visit_tracking.sql")),
-        (8, include_str!("../migrations/008_appointment_status.sql")),
-        (9, include_str!("../migrations/009_patient_search.sql")),
+    for (version, sql) in [
+        (2, include_str!("../migrations/002_touch_triggers.sql")),
+        (3, include_str!("../migrations/003_scheduling_rules.sql")),
+        (
+            4,
+            include_str!("../migrations/004_patient_medical_details.sql"),
+        ),
+        (
+            5,
+            include_str!("../migrations/005_patient_last_activity.sql"),
+        ),
+        (
+            6,
+            include_str!("../migrations/006_patient_activity_triggers.sql"),
+        ),
+        (
+            7,
+            include_str!("../migrations/007_appointment_visit_tracking.sql"),
+        ),
+        (8, include_str!("../migrations/008_optional_auth.sql")),
+        (
+            9,
+            include_str!("../migrations/009_remove_optional_auth.sql"),
+        ),
         (
             10,
-            include_str!("../migrations/010_users_roles_audit_actor.sql"),
+            include_str!("../migrations/010_restore_users_roles_audit_actor.sql"),
         ),
         (
             11,
@@ -78,22 +88,27 @@ pub fn migrate_db(conn: &Connection) -> Result<(), String> {
             15,
             include_str!("../migrations/015_attachment_restore_limit.sql"),
         ),
-    ];
-    for (target, sql) in migrations {
-        if version < *target {
-            conn.execute_batch(sql).map_err(|e| e.to_string())?;
-            version = *target;
+    ] {
+        if schema_version(db)? < version {
+            db.execute_batch(sql).map_err(|e| e.to_string())?;
+            if schema_version(db)? != version {
+                return Err(format!("فشل ترحيل قاعدة البيانات إلى الإصدار {version}"));
+            }
         }
+    }
+    if schema_version(db)? != LATEST_SCHEMA_VERSION {
+        return Err("فشل الوصول إلى أحدث إصدار لقاعدة البيانات".into());
     }
     Ok(())
 }
-
-fn init_db(path: &Path) -> Result<Connection, String> {
-    let conn = Connection::open(path).map_err(|e| e.to_string())?;
-    migrate_db(&conn)?;
-    Ok(conn)
+fn init_db(path: &PathBuf) -> Result<Connection, String> {
+    if let Some(p) = path.parent() {
+        fs::create_dir_all(p).map_err(|e| e.to_string())?;
+    }
+    let db = Connection::open(path).map_err(|e| e.to_string())?;
+    migrate_db(&db)?;
+    Ok(db)
 }
-
 fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&Connection) -> Result<T, String>,
@@ -103,7 +118,6 @@ fn with_db<T>(
             .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
-
 #[tauri::command]
 fn health() -> &'static str {
     "ok"
@@ -111,23 +125,28 @@ fn health() -> &'static str {
 #[tauri::command]
 fn patient_list(
     db: tauri::State<Db>,
-    search: Option<String>,
+    query: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<patients::Patient>, String> {
-    with_db(&db, |c| {
-        patients::list(c, search.as_deref(), limit.unwrap_or(100))
-    })
+    with_db(&db, |c| patients::list(c, query, limit.unwrap_or(50)))
 }
 #[tauri::command]
 fn patient_count(db: tauri::State<Db>) -> Result<i64, String> {
-    with_db(&db, patients::count)
+    with_db(&db, |c| {
+        c.query_row(
+            "SELECT COUNT(*) FROM patients WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())
+    })
 }
 #[tauri::command]
 fn patient_by_file_no(
     db: tauri::State<Db>,
     file_no: i64,
 ) -> Result<Option<patients::Patient>, String> {
-    with_db(&db, |c| patients::by_file_no(c, file_no))
+    with_db(&db, |c| patients::get_by_file_no(c, file_no))
 }
 #[tauri::command]
 fn patient_inactive(
@@ -364,7 +383,6 @@ fn closure_create(db: tauri::State<Db>, input: scheduling::ClosureInput) -> Resu
 fn closure_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
     with_db(&db, |c| scheduling::delete_closure(c, id))
 }
-
 fn security_log_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
@@ -379,17 +397,9 @@ fn security_failure(
     error: &str,
     sha: Option<&str>,
 ) {
-    let _ = security_log::append_operation(
-        log,
-        event_type,
-        "failure",
-        reference,
-        stage,
-        security_log::failure_code(error),
-        sha,
-    );
+    let detail = security_log::operation_detail(stage, security_log::failure_code(error), sha);
+    let _ = security_log::append(log, event_type, "failure", Some(reference), Some(&detail));
 }
-
 #[tauri::command]
 fn backup_create(
     app: tauri::AppHandle,
@@ -399,19 +409,13 @@ fn backup_create(
     let reference = format!("BKP-{}", Uuid::new_v4());
     let log = security_log_path(&app)?;
     security_log::verify(&log)?;
-    security_log::append_operation(
-        &log,
-        "backup",
-        "started",
-        &reference,
-        "backup_create",
-        "started",
-        None,
-    )?;
-    let g = db.0.lock().map_err(|_| {
-        let e = "تعذر الوصول إلى قاعدة البيانات".to_string();
-        security_failure(&log, "backup", &reference, "db_lock", &e, None);
-        e
+    let started = security_log::operation_detail("backup_create", "started", None);
+    security_log::append(&log, "backup", "started", Some(&reference), Some(&started))?;
+    let g = db.0.lock().map_err(|e| {
+        let err = "تعذر الوصول إلى قاعدة البيانات".to_string();
+        security_failure(&log, "backup", &reference, "db_lock", &err, None);
+        let _ = e;
+        err
     })?;
     let hash = match backup::create_database_backup(
         &g,
@@ -429,18 +433,10 @@ fn backup_create(
         security_failure(&log, "backup", &reference, "audit_write", &e, Some(&hash));
         return Err(e);
     }
-    security_log::append_operation(
-        &log,
-        "backup",
-        "success",
-        &reference,
-        "backup_create",
-        "completed",
-        Some(&hash),
-    )?;
+    let success = security_log::operation_detail("backup_create", "completed", Some(&hash));
+    security_log::append(&log, "backup", "success", Some(&reference), Some(&success))?;
     Ok(hash)
 }
-
 #[tauri::command]
 fn backup_restore(
     app: tauri::AppHandle,
@@ -450,15 +446,8 @@ fn backup_restore(
     let reference = format!("RST-{}", Uuid::new_v4());
     let log = security_log_path(&app)?;
     security_log::verify(&log)?;
-    security_log::append_operation(
-        &log,
-        "restore",
-        "started",
-        &reference,
-        "restore_request",
-        "started",
-        None,
-    )?;
+    let started = security_log::operation_detail("restore_request", "started", None);
+    security_log::append(&log, "restore", "started", Some(&reference), Some(&started))?;
     let source = Path::new(&source_path);
     let source_hash = match backup::sha256_file(source) {
         Ok(h) => h,
@@ -524,16 +513,10 @@ fn backup_restore(
     match backup::restore_database(&mut g, source, &live_path, LATEST_SCHEMA_VERSION) {
         Ok(hash) => {
             audit::record(&g, "restore_completed", "database", None, Some(&details))?;
-            if security_log::append_operation(
-                &log,
-                "restore",
-                "success",
-                &reference,
-                "restore_commit",
-                "completed",
-                Some(&hash),
-            )
-            .is_err()
+            let success =
+                security_log::operation_detail("restore_commit", "completed", Some(&hash));
+            if let Err(log_error) =
+                security_log::append(&log, "restore", "success", Some(&reference), Some(&success))
             {
                 let warning =
                     serde_json::json!({"restoreRef":reference,"code":"security_log_write_failed"})
@@ -545,6 +528,7 @@ fn backup_restore(
                     None,
                     Some(&warning),
                 );
+                let _ = log_error;
             }
             Ok(hash)
         }
@@ -561,7 +545,6 @@ fn backup_restore(
         }
     }
 }
-
 #[tauri::command]
 fn audit_recent(
     db: tauri::State<Db>,
@@ -569,7 +552,6 @@ fn audit_recent(
 ) -> Result<Vec<audit::AuditEntry>, String> {
     with_db(&db, |c| audit::recent(c, limit.unwrap_or(100)))
 }
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -619,10 +601,6 @@ pub fn run() {
             closure_list,
             closure_create,
             closure_delete,
-            users::user_list,
-            users::user_create,
-            users::user_update,
-            users::user_deactivate,
             backup_create,
             backup_restore,
             audit_recent
