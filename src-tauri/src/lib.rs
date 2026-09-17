@@ -2,6 +2,8 @@ pub mod appointment_status;
 pub mod appointments;
 pub mod attachments;
 pub mod audit;
+pub mod auth;
+pub mod auth_commands;
 pub mod backup;
 pub mod directory;
 pub mod domain;
@@ -632,6 +634,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            auth_commands::auth_login,
+            auth_commands::auth_logout,
+            auth_commands::auth_validate_session,
+            auth_commands::user_list,
+            auth_commands::user_create,
+            auth_commands::user_update,
+            auth_commands::user_set_status,
+            auth_commands::user_reset_password,
             health,
             patient_list,
             patient_count,
