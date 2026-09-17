@@ -80,11 +80,45 @@ fn explicit_role_grant(db: &Connection, role: &str, capability: &str) -> Result<
     .map_err(|e| e.to_string())
 }
 
-pub fn deputy_restore_granted(db: &Connection) -> Result<bool, String> {
+pub fn authorize(
+    db: &Connection,
+    token: Option<&str>,
+    capability: &str,
+) -> Result<Option<UserSummary>, String> {
+    if !auth_enabled(db)? {
+        return Ok(None);
+    }
+    let token = token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "تسجيل الدخول مطلوب لتنفيذ هذه العملية".to_string())?;
+    let user = auth::validate_session(db, token.to_string())?;
+    if !role_allows(&user.role_type, capability)
+        && !explicit_role_grant(db, &user.role_type, capability)?
+    {
+        return Err("ليس لديك صلاحية لتنفيذ هذه العملية".to_string());
+    }
+    Ok(Some(user))
+}
+
+fn deputy_restore_granted_unchecked(db: &Connection) -> Result<bool, String> {
     explicit_role_grant(db, DEPUTY_ROLE, BACKUP_RESTORE)
 }
 
-pub fn set_deputy_restore_grant(db: &Connection, enabled: bool) -> Result<(), String> {
+pub fn deputy_restore_granted(
+    db: &Connection,
+    actor_token: Option<&str>,
+) -> Result<bool, String> {
+    authorize(db, actor_token, SECURITY_MANAGE)?;
+    deputy_restore_granted_unchecked(db)
+}
+
+pub fn set_deputy_restore_grant(
+    db: &Connection,
+    actor_token: Option<&str>,
+    enabled: bool,
+) -> Result<(), String> {
+    authorize(db, actor_token, SECURITY_MANAGE)?;
     let role_id: i64 = db
         .query_row(
             "SELECT id FROM roles WHERE name=?1 COLLATE NOCASE",
@@ -107,27 +141,6 @@ pub fn set_deputy_restore_grant(db: &Connection, enabled: bool) -> Result<(), St
         .map_err(|e| e.to_string())?;
     }
     Ok(())
-}
-
-pub fn authorize(
-    db: &Connection,
-    token: Option<&str>,
-    capability: &str,
-) -> Result<Option<UserSummary>, String> {
-    if !auth_enabled(db)? {
-        return Ok(None);
-    }
-    let token = token
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| "تسجيل الدخول مطلوب لتنفيذ هذه العملية".to_string())?;
-    let user = auth::validate_session(db, token.to_string())?;
-    if !role_allows(&user.role_type, capability)
-        && !explicit_role_grant(db, &user.role_type, capability)?
-    {
-        return Err("ليس لديك صلاحية لتنفيذ هذه العملية".to_string());
-    }
-    Ok(Some(user))
 }
 
 #[cfg(test)]
@@ -171,6 +184,8 @@ mod tests {
     fn local_mode_allows_operations_without_fake_user() {
         let db = db();
         assert!(authorize(&db, None, BACKUP_RESTORE).unwrap().is_none());
+        set_deputy_restore_grant(&db, None, true).unwrap();
+        assert!(deputy_restore_granted(&db, None).unwrap());
     }
 
     #[test]
@@ -197,36 +212,36 @@ mod tests {
         assert!(authorize(&db, Some(&token), APPOINTMENT_WRITE).is_ok());
         assert!(authorize(&db, Some(&token), USER_MANAGE).is_err());
         assert!(authorize(&db, Some(&token), BACKUP_CREATE).is_err());
+        assert!(set_deputy_restore_grant(&db, Some(&token), true).is_err());
     }
 
     #[test]
-    fn manager_and_deputy_backup_policy_is_enforced() {
-        let mut gm_db = db();
-        let gm = session(&mut gm_db, 1, "general_manager");
-        gm_db
-            .execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
+    fn manager_controls_deputy_restore_grant_and_deputy_cannot_self_grant() {
+        let mut db = db();
+        let deputy = session(&mut db, 1, "deputy_manager");
+        let manager = session(&mut db, 2, "general_manager");
+        db.execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
             .unwrap();
-        assert!(authorize(&gm_db, Some(&gm), USER_MANAGE).is_ok());
-        assert!(authorize(&gm_db, Some(&gm), BACKUP_CREATE).is_ok());
-        assert!(authorize(&gm_db, Some(&gm), BACKUP_RESTORE).is_ok());
-        assert!(authorize(&gm_db, Some(&gm), SECURITY_MANAGE).is_ok());
 
-        let mut deputy_db = db();
-        let deputy = session(&mut deputy_db, 1, "deputy_manager");
-        deputy_db
-            .execute("UPDATE security_settings SET auth_enabled=1 WHERE id=1", [])
-            .unwrap();
-        assert!(authorize(&deputy_db, Some(&deputy), USER_MANAGE).is_ok());
-        assert!(authorize(&deputy_db, Some(&deputy), BACKUP_CREATE).is_ok());
-        assert!(authorize(&deputy_db, Some(&deputy), BACKUP_RESTORE).is_err());
-        assert!(authorize(&deputy_db, Some(&deputy), SECURITY_MANAGE).is_err());
+        assert!(authorize(&db, Some(&deputy), USER_MANAGE).is_ok());
+        assert!(authorize(&db, Some(&deputy), BACKUP_CREATE).is_ok());
+        assert!(authorize(&db, Some(&deputy), BACKUP_RESTORE).is_err());
+        assert!(authorize(&db, Some(&deputy), SECURITY_MANAGE).is_err());
+        assert!(set_deputy_restore_grant(&db, Some(&deputy), true).is_err());
+        assert!(deputy_restore_granted(&db, Some(&deputy)).is_err());
 
-        set_deputy_restore_grant(&deputy_db, true).unwrap();
-        assert!(deputy_restore_granted(&deputy_db).unwrap());
-        assert!(authorize(&deputy_db, Some(&deputy), BACKUP_RESTORE).is_ok());
-        set_deputy_restore_grant(&deputy_db, false).unwrap();
-        assert!(!deputy_restore_granted(&deputy_db).unwrap());
-        assert!(authorize(&deputy_db, Some(&deputy), BACKUP_RESTORE).is_err());
+        assert!(authorize(&db, Some(&manager), USER_MANAGE).is_ok());
+        assert!(authorize(&db, Some(&manager), BACKUP_CREATE).is_ok());
+        assert!(authorize(&db, Some(&manager), BACKUP_RESTORE).is_ok());
+        assert!(authorize(&db, Some(&manager), SECURITY_MANAGE).is_ok());
+
+        set_deputy_restore_grant(&db, Some(&manager), true).unwrap();
+        assert!(deputy_restore_granted(&db, Some(&manager)).unwrap());
+        assert!(authorize(&db, Some(&deputy), BACKUP_RESTORE).is_ok());
+
+        set_deputy_restore_grant(&db, Some(&manager), false).unwrap();
+        assert!(!deputy_restore_granted(&db, Some(&manager)).unwrap());
+        assert!(authorize(&db, Some(&deputy), BACKUP_RESTORE).is_err());
     }
 
     #[test]
