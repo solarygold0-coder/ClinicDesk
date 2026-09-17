@@ -146,7 +146,7 @@ fn database_rejects_restore_that_would_exceed_twenty_active_attachments() {
 fn role_capability_migration_seeds_roles_without_default_restore_grant() {
     let db = fresh();
     migrate_db(&db).unwrap();
-    assert_eq!(schema_version(&db).unwrap(), 16);
+    assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
 
     let canonical_roles: i64 = db
         .query_row(
@@ -177,4 +177,43 @@ fn role_capability_migration_seeds_roles_without_default_restore_grant() {
         )
         .unwrap();
     assert_eq!(architecture, "role-capabilities-v1");
+}
+
+#[test]
+fn provider_unavailability_schema_is_present() {
+    let db = fresh();
+    migrate_db(&db).unwrap();
+    assert_eq!(schema_version(&db).unwrap(), 17);
+    let mut stmt = db.prepare("PRAGMA table_info(appointments)").unwrap();
+    let columns = stmt
+        .query_map([], |r| r.get::<_, String>(1))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    for required in [
+        "disruption_kind",
+        "disruption_reason_code",
+        "disruption_resolution",
+        "provider_unavailability_event_id",
+        "original_appointment_id",
+        "replacement_appointment_id",
+    ] {
+        assert!(columns.iter().any(|c| c == required), "missing {required}");
+    }
+    let events: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='provider_unavailability_events'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let actions: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='provider_unavailability_actions'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(events, 1);
+    assert_eq!(actions, 1);
 }

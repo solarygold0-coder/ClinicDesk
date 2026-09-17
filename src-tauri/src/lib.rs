@@ -9,6 +9,7 @@ pub mod backup;
 pub mod directory;
 pub mod domain;
 pub mod patients;
+pub mod provider_unavailability;
 pub mod scheduling;
 pub mod security_log;
 pub mod users;
@@ -27,7 +28,7 @@ use std::{
 use tauri::Manager;
 use uuid::Uuid;
 pub struct Db(pub Mutex<Connection>);
-const LATEST_SCHEMA_VERSION: i64 = 16;
+const LATEST_SCHEMA_VERSION: i64 = 17;
 fn schema_version(db: &Connection) -> Result<i64, String> {
     db.query_row(
         "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
@@ -94,6 +95,10 @@ fn migrate_db(db: &Connection) -> Result<(), String> {
         (
             16,
             include_str!("../migrations/016_role_capability_grants.sql"),
+        ),
+        (
+            17,
+            include_str!("../migrations/017_provider_unavailability.sql"),
         ),
     ] {
         if schema_version(db)? < version {
@@ -380,6 +385,46 @@ fn appointment_status(
         db.0.lock()
             .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointment_status::set_status(&mut g, id, &status)
+}
+#[tauri::command]
+fn provider_unavailability_create(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    input: provider_unavailability::ProviderUnavailabilityInput,
+) -> Result<provider_unavailability::ProviderUnavailabilityEvent, String> {
+    authorize_command(
+        &db,
+        actor_token.as_deref(),
+        authorization::APPOINTMENT_WRITE,
+    )?;
+    with_db(&db, |c| provider_unavailability::create_event(c, input))
+}
+#[tauri::command]
+fn provider_unavailability_affected(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    event_id: i64,
+) -> Result<Vec<provider_unavailability::AffectedAppointment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;
+    with_db(&db, |c| {
+        provider_unavailability::affected_appointments(c, event_id)
+    })
+}
+#[tauri::command]
+fn provider_unavailability_resolve_many(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    event_id: i64,
+    resolutions: Vec<provider_unavailability::ResolutionInput>,
+) -> Result<(), String> {
+    authorize_command(
+        &db,
+        actor_token.as_deref(),
+        authorization::APPOINTMENT_WRITE,
+    )?;
+    with_db(&db, |c| {
+        provider_unavailability::resolve_many(c, event_id, resolutions)
+    })
 }
 #[tauri::command]
 fn visit_tracking_update(
@@ -800,6 +845,9 @@ pub fn run() {
             appointment_create,
             appointment_update,
             appointment_status,
+            provider_unavailability_create,
+            provider_unavailability_affected,
+            provider_unavailability_resolve_many,
             visit_tracking_update,
             visit_tracking_command::visit_tracking_get,
             visit_follow_ups,
