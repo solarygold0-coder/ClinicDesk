@@ -191,6 +191,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --manifest-path src-tauri/Cargo.toml attachments::tests -- --nocapture
 
+  backup-restore-tests:
+    name: Backup / Restore gate tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --test backup_restore_gate -- --nocapture
+
   scheduling-tests:
     name: Scheduling tests
     runs-on: windows-latest
@@ -258,6 +266,7 @@ jobs:
       - rust-format
       - migration-tests
       - attachment-tests
+      - backup-restore-tests
       - scheduling-tests
       - appointment-tests
       - patient-tests
@@ -284,6 +293,7 @@ jobs:
             ${{ needs.rust-format.result }}
             ${{ needs.migration-tests.result }}
             ${{ needs.attachment-tests.result }}
+            ${{ needs.backup-restore-tests.result }}
             ${{ needs.scheduling-tests.result }}
             ${{ needs.appointment-tests.result }}
             ${{ needs.patient-tests.result }}
