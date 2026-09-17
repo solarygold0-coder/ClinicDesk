@@ -4,6 +4,7 @@ pub mod attachments;
 pub mod audit;
 pub mod auth;
 pub mod auth_commands;
+pub mod authorization;
 pub mod backup;
 pub mod directory;
 pub mod domain;
@@ -120,6 +121,16 @@ fn with_db<T>(
             .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&g)
 }
+fn authorize_command(
+    db: &tauri::State<Db>,
+    actor_token: Option<&str>,
+    capability: &str,
+) -> Result<(), String> {
+    with_db(db, |conn| {
+        authorization::authorize(conn, actor_token, capability)?;
+        Ok(())
+    })
+}
 #[tauri::command]
 fn health() -> &'static str {
     "ok"
@@ -127,13 +138,16 @@ fn health() -> &'static str {
 #[tauri::command]
 fn patient_list(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     query: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<patients::Patient>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_READ)?;
     with_db(&db, |c| patients::list(c, query, limit.unwrap_or(50)))
 }
 #[tauri::command]
-fn patient_count(db: tauri::State<Db>) -> Result<i64, String> {
+fn patient_count(db: tauri::State<Db>, actor_token: Option<String>) -> Result<i64, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_READ)?;
     with_db(&db, |c| {
         c.query_row(
             "SELECT COUNT(*) FROM patients WHERE deleted_at IS NULL",
@@ -146,16 +160,20 @@ fn patient_count(db: tauri::State<Db>) -> Result<i64, String> {
 #[tauri::command]
 fn patient_by_file_no(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     file_no: i64,
 ) -> Result<Option<patients::Patient>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_READ)?;
     with_db(&db, |c| patients::get_by_file_no(c, file_no))
 }
 #[tauri::command]
 fn patient_inactive(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     years: Option<i64>,
     limit: Option<i64>,
 ) -> Result<Vec<patients::Patient>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_READ)?;
     with_db(&db, |c| {
         patients::inactive_for_years(c, years.unwrap_or(10), limit.unwrap_or(100))
     })
@@ -163,8 +181,10 @@ fn patient_inactive(
 #[tauri::command]
 fn patient_create(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_WRITE)?;
     let mut g =
         db.0.lock()
             .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
@@ -173,78 +193,112 @@ fn patient_create(
 #[tauri::command]
 fn patient_update(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     id: i64,
     input: patients::PatientInput,
 ) -> Result<patients::Patient, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_WRITE)?;
     with_db(&db, |c| patients::update(c, id, input))
 }
 #[tauri::command]
-fn patient_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+fn patient_delete(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    id: i64,
+) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_WRITE)?;
     with_db(&db, |c| patients::soft_delete(c, id))
 }
 #[tauri::command]
-fn patient_future_appointment_count(db: tauri::State<Db>, id: i64) -> Result<i64, String> {
+fn patient_future_appointment_count(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    id: i64,
+) -> Result<i64, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::PATIENT_READ)?;
     with_db(&db, |c| patients::future_appointment_count(c, id))
 }
 #[tauri::command]
-fn clinic_list(db: tauri::State<Db>) -> Result<Vec<directory::Clinic>, String> {
+fn clinic_list(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+) -> Result<Vec<directory::Clinic>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_READ)?;
     with_db(&db, directory::list_clinics)
 }
 #[tauri::command]
 fn clinic_create(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     input: directory::ClinicInput,
 ) -> Result<directory::Clinic, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_WRITE)?;
     with_db(&db, |c| directory::create_clinic(c, input))
 }
 #[tauri::command]
 fn clinic_update(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     id: i64,
     input: directory::ClinicInput,
 ) -> Result<directory::Clinic, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_WRITE)?;
     with_db(&db, |c| directory::update_clinic(c, id, input))
 }
 #[tauri::command]
-fn clinic_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+fn clinic_delete(db: tauri::State<Db>, actor_token: Option<String>, id: i64) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_WRITE)?;
     with_db(&db, |c| directory::deactivate_clinic(c, id))
 }
 #[tauri::command]
-fn doctor_list(db: tauri::State<Db>) -> Result<Vec<directory::Doctor>, String> {
+fn doctor_list(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+) -> Result<Vec<directory::Doctor>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_READ)?;
     with_db(&db, directory::list_doctors)
 }
 #[tauri::command]
 fn doctor_create(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     input: directory::DoctorInput,
 ) -> Result<directory::Doctor, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_WRITE)?;
     with_db(&db, |c| directory::create_doctor(c, input))
 }
 #[tauri::command]
 fn doctor_update(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     id: i64,
     input: directory::DoctorInput,
 ) -> Result<directory::Doctor, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_WRITE)?;
     with_db(&db, |c| directory::update_doctor(c, id, input))
 }
 #[tauri::command]
-fn doctor_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+fn doctor_delete(db: tauri::State<Db>, actor_token: Option<String>, id: i64) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::DIRECTORY_WRITE)?;
     with_db(&db, |c| directory::deactivate_doctor(c, id))
 }
 #[tauri::command]
 fn appointment_list(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     from: String,
     to: String,
 ) -> Result<Vec<appointments::Appointment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;
     with_db(&db, |c| appointments::list(c, &from, &to))
 }
 #[tauri::command]
 fn appointment_missed_history(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     to: String,
 ) -> Result<Vec<appointments::Appointment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;
     with_db(&db, |c| {
         Ok(appointments::list(c, "1900-01-01T00:00:00", &to)?
             .into_iter()
@@ -255,16 +309,20 @@ fn appointment_missed_history(
 #[tauri::command]
 fn appointment_upcoming_all(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     from: String,
 ) -> Result<Vec<appointments::Appointment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;
     with_db(&db, |c| appointments::list(c, &from, "9999-12-31T23:59:59"))
 }
 #[tauri::command]
 fn patient_appointments(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     patient_id: i64,
     limit: Option<i64>,
 ) -> Result<Vec<appointments::Appointment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;
     with_db(&db, |c| {
         appointments::list_for_patient(c, patient_id, limit.unwrap_or(30))
     })
@@ -272,8 +330,14 @@ fn patient_appointments(
 #[tauri::command]
 fn appointment_create(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
+    authorize_command(
+        &db,
+        actor_token.as_deref(),
+        authorization::APPOINTMENT_WRITE,
+    )?;
     let mut g =
         db.0.lock()
             .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
@@ -282,16 +346,32 @@ fn appointment_create(
 #[tauri::command]
 fn appointment_update(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     id: i64,
     input: appointments::AppointmentInput,
 ) -> Result<appointments::Appointment, String> {
+    authorize_command(
+        &db,
+        actor_token.as_deref(),
+        authorization::APPOINTMENT_WRITE,
+    )?;
     let mut g =
         db.0.lock()
             .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     appointments::update(&mut g, id, input)
 }
 #[tauri::command]
-fn appointment_status(db: tauri::State<Db>, id: i64, status: String) -> Result<(), String> {
+fn appointment_status(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    id: i64,
+    status: String,
+) -> Result<(), String> {
+    authorize_command(
+        &db,
+        actor_token.as_deref(),
+        authorization::APPOINTMENT_WRITE,
+    )?;
     let mut g =
         db.0.lock()
             .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
@@ -300,31 +380,39 @@ fn appointment_status(db: tauri::State<Db>, id: i64, status: String) -> Result<(
 #[tauri::command]
 fn visit_tracking_update(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     id: i64,
     input: visit_tracking::VisitTrackingInput,
 ) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::VISIT_WRITE)?;
     with_db(&db, |c| visit_tracking::update(c, id, input))
 }
 #[tauri::command]
 fn visit_follow_ups(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     from: String,
     to: String,
 ) -> Result<Vec<visit_tracking::FollowUpVisit>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::VISIT_READ)?;
     with_db(&db, |c| visit_tracking::follow_ups(c, &from, &to))
 }
 #[tauri::command]
 fn attachment_list(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     patient_id: i64,
 ) -> Result<Vec<attachments::Attachment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::ATTACHMENT_READ)?;
     with_db(&db, |c| attachments::list(c, patient_id))
 }
 #[tauri::command]
 fn attachment_archived_list(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     patient_id: i64,
 ) -> Result<Vec<attachments::Attachment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::ATTACHMENT_READ)?;
     with_db(&db, |c| attachments::list_archived(c, patient_id))
 }
 fn attachment_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -337,11 +425,13 @@ fn attachment_root(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn attachment_import(
     app: tauri::AppHandle,
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     patient_id: i64,
     source_path: String,
     display_name: Option<String>,
     category: Option<String>,
 ) -> Result<i64, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::ATTACHMENT_WRITE)?;
     let root = attachment_root(&app)?;
     with_db(&db, |c| {
         attachments::import_file_named(
@@ -355,34 +445,66 @@ fn attachment_import(
     })
 }
 #[tauri::command]
-fn attachment_archive(db: tauri::State<Db>, id: i64, reason: String) -> Result<(), String> {
+fn attachment_archive(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    id: i64,
+    reason: String,
+) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::ATTACHMENT_WRITE)?;
     with_db(&db, |c| attachments::archive(c, id, &reason))
 }
 #[tauri::command]
-fn attachment_restore(db: tauri::State<Db>, id: i64, reason: String) -> Result<(), String> {
+fn attachment_restore(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    id: i64,
+    reason: String,
+) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::ATTACHMENT_WRITE)?;
     with_db(&db, |c| attachments::restore(c, id, &reason))
 }
 #[tauri::command]
-fn scheduling_settings_get(db: tauri::State<Db>) -> Result<scheduling::SchedulingSettings, String> {
+fn scheduling_settings_get(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+) -> Result<scheduling::SchedulingSettings, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::SCHEDULE_READ)?;
     with_db(&db, scheduling::get)
 }
 #[tauri::command]
 fn scheduling_settings_update(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     input: scheduling::SchedulingSettings,
 ) -> Result<scheduling::SchedulingSettings, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::SCHEDULE_WRITE)?;
     with_db(&db, |c| scheduling::update(c, input))
 }
 #[tauri::command]
-fn closure_list(db: tauri::State<Db>) -> Result<Vec<scheduling::ClosureDate>, String> {
+fn closure_list(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+) -> Result<Vec<scheduling::ClosureDate>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::SCHEDULE_READ)?;
     with_db(&db, scheduling::closures)
 }
 #[tauri::command]
-fn closure_create(db: tauri::State<Db>, input: scheduling::ClosureInput) -> Result<(), String> {
+fn closure_create(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    input: scheduling::ClosureInput,
+) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::SCHEDULE_WRITE)?;
     with_db(&db, |c| scheduling::add_closure(c, input))
 }
 #[tauri::command]
-fn closure_delete(db: tauri::State<Db>, id: i64) -> Result<(), String> {
+fn closure_delete(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    id: i64,
+) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::SCHEDULE_WRITE)?;
     with_db(&db, |c| scheduling::delete_closure(c, id))
 }
 fn security_log_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -427,8 +549,10 @@ fn record_security_log_warning(db: &Connection, reference: &str) {
 fn backup_create(
     app: tauri::AppHandle,
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     destination_path: String,
 ) -> Result<String, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::BACKUP_CREATE)?;
     let reference = format!("BKP-{}", Uuid::new_v4());
     let log = security_log_path(&app)?;
     security_log::verify(&log)?;
@@ -487,8 +611,10 @@ fn backup_create(
 fn backup_restore(
     app: tauri::AppHandle,
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     source_path: String,
 ) -> Result<String, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::BACKUP_RESTORE)?;
     let reference = format!("RST-{}", Uuid::new_v4());
     let log = security_log_path(&app)?;
     security_log::verify(&log)?;
@@ -618,8 +744,10 @@ fn backup_restore(
 #[tauri::command]
 fn audit_recent(
     db: tauri::State<Db>,
+    actor_token: Option<String>,
     limit: Option<i64>,
 ) -> Result<Vec<audit::AuditEntry>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::AUDIT_READ)?;
     with_db(&db, |c| audit::recent(c, limit.unwrap_or(100)))
 }
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
