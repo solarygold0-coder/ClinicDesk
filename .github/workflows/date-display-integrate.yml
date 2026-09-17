@@ -24,12 +24,11 @@ jobs:
       - run: node scripts/appointment-advisory-contract.mjs
       - run: node scripts/two-day-reminder-contract.mjs
       - run: node scripts/full-date-display-contract.mjs
-      - name: Commit integration
+      - name: Commit application integration
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm .github/workflows/date-display-integrate.yml scripts/apply-date-display.py
-          git add src/PatientsPage.tsx src/AppointmentsPage.tsx src/ReadOnlyAppointmentsPage.tsx src/Dashboard.tsx scripts/ui-contract.mjs scripts/full-date-display-contract.mjs .github/workflows/ui-contract.yml
+          git add src/PatientsPage.tsx src/AppointmentsPage.tsx src/ReadOnlyAppointmentsPage.tsx src/Dashboard.tsx scripts/ui-contract.mjs scripts/full-date-display-contract.mjs
           git commit -m "Unify full Gregorian date display across application"
           git pull --rebase origin tauri-react-rebuild
           git push origin HEAD:tauri-react-rebuild
