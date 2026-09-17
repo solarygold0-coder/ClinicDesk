@@ -24,6 +24,18 @@ jobs:
           components: rustfmt
       - name: Apply user-visible integration
         run: python scripts/apply-visible-feature-integration.py
+      - name: Align attachment contract with secure backend opener
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/ui-contract.mjs')
+          s=p.read_text()
+          old="['attachments use Windows associations and block duplicate mutation UI', files.attachments.includes('openPath(') && files.attachments.includes('برنامج في Windows') && files.attachments.includes('aria-busy={busy}') && t.attachments.includes('if(busy')],"
+          new="['attachments use verified backend opening and block duplicate mutation UI', files.attachments.includes('api.openAttachment(item.id)') && files.attachments.includes('برنامج في Windows') && files.attachments.includes('aria-busy={busy}') && t.attachments.includes('if(busy') && t.api.includes(\"openAttachment:(id:number)=>authed<void>('attachment_open',{id})\")],"
+          if old not in s:
+              raise SystemExit('obsolete attachment contract not found')
+          p.write_text(s.replace(old,new,1))
+          PY
       - name: Validate frontend and visible contracts
         run: |
           npm install --ignore-scripts
@@ -38,7 +50,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/App.tsx src/main.tsx src/SchedulingPage.tsx src/PatientsPage.tsx src/AppointmentsPage.tsx src/ReadOnlyAppointmentsPage.tsx src/Dashboard.tsx src/api.ts scripts/ui-contract.mjs scripts/visible-feature-contract.mjs src-tauri/src/appointments.rs src-tauri/src/lib.rs
+          git add src/App.tsx src/main.tsx src/SchedulingPage.tsx src/PatientsPage.tsx src/AppointmentsPage.tsx src/ReadOnlyAppointmentsPage.tsx src/Dashboard.tsx src/api.ts scripts/ui-contract.mjs scripts/visible-feature-contract.mjs src-tauri/src/appointments.rs src-tauri/src/lib.rs Cargo.lock
           git commit -m "Expose approved appointments settings and print behavior in UI"
           git pull --rebase origin tauri-react-rebuild
           git push origin HEAD:tauri-react-rebuild
