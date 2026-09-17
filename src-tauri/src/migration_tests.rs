@@ -141,3 +141,37 @@ fn database_rejects_restore_that_would_exceed_twenty_active_attachments() {
         "failed restore must preserve archived state"
     );
 }
+
+#[test]
+fn role_capability_migration_seeds_roles_without_default_restore_grant() {
+    let db = fresh();
+    migrate_db(&db).unwrap();
+    assert_eq!(schema_version(&db).unwrap(), 16);
+
+    let canonical_roles: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM roles WHERE name IN ('ordinary_employee','general_manager','deputy_manager','doctor','specialist')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(canonical_roles, 5);
+
+    let restore_grants: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM role_capabilities WHERE capability='backup.restore'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(restore_grants, 0, "restore must require an explicit later grant");
+
+    let architecture: String = db
+        .query_row(
+            "SELECT value FROM app_meta WHERE key='auth_capability_grants'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(architecture, "role-capabilities-v1");
+}
