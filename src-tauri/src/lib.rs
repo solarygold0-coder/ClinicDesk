@@ -27,7 +27,7 @@ use std::{
 use tauri::Manager;
 use uuid::Uuid;
 pub struct Db(pub Mutex<Connection>);
-const LATEST_SCHEMA_VERSION: i64 = 15;
+const LATEST_SCHEMA_VERSION: i64 = 16;
 fn schema_version(db: &Connection) -> Result<i64, String> {
     db.query_row(
         "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='schema_version'",
@@ -90,6 +90,10 @@ fn migrate_db(db: &Connection) -> Result<(), String> {
         (
             15,
             include_str!("../migrations/015_attachment_restore_limit.sql"),
+        ),
+        (
+            16,
+            include_str!("../migrations/016_role_capability_grants.sql"),
         ),
     ] {
         if schema_version(db)? < version {
@@ -770,6 +774,8 @@ pub fn run() {
             auth_commands::user_update,
             auth_commands::user_set_status,
             auth_commands::user_reset_password,
+            auth_commands::deputy_restore_permission_get,
+            auth_commands::deputy_restore_permission_set,
             health,
             patient_list,
             patient_count,
