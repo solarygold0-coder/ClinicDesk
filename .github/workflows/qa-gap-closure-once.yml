@@ -23,7 +23,9 @@ jobs:
         with:
           components: rustfmt
       - name: Apply uncovered requirement fixes and tests
-        run: python -X utf8 scripts/apply-qa-gap-closure.py
+        run: |
+          python -X utf8 scripts/apply-qa-gap-closure.py
+          python -X utf8 scripts/apply-qa-gap-supplement.py
       - name: Format Rust workspace
         run: cargo fmt --all
       - name: Validate frontend and permanent contracts
@@ -43,8 +45,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src-tauri/src/patients.rs src-tauri/src/appointments.rs src-tauri/src/auth.rs src-tauri/src/auth_commands.rs src-tauri/src/migration_tests.rs .github/workflows/build.yml .github/workflows/format-repair-current.yml docs/TEST_COVERAGE_MATRIX.md server/src Cargo.lock
-          git rm scripts/apply-qa-gap-closure.py .github/workflows/qa-gap-closure-once.yml
+          git add src-tauri/src/patients.rs src-tauri/src/appointments.rs src-tauri/src/auth.rs src-tauri/src/auth_commands.rs src-tauri/src/authorization.rs src-tauri/src/visit_tracking.rs src-tauri/src/directory.rs src-tauri/src/scheduling.rs src-tauri/src/migration_tests.rs .github/workflows/build.yml .github/workflows/format-repair-current.yml docs/TEST_COVERAGE_MATRIX.md server/src Cargo.lock
+          git rm scripts/apply-qa-gap-closure.py scripts/apply-qa-gap-supplement.py .github/workflows/qa-gap-closure-once.yml
           git commit -m "Close uncovered ClinicDesk requirement test gaps"
           git pull --rebase origin tauri-react-rebuild
           git push origin HEAD:tauri-react-rebuild
