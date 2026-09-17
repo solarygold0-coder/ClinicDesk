@@ -1,0 +1,363 @@
+name: integrate-provider-unavailability-ui
+on:
+  push:
+    branches: [tauri-react-rebuild]
+permissions:
+  contents: write
+concurrency:
+  group: integrate-provider-unavailability-ui
+  cancel-in-progress: true
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Integrate provider unavailability UI and resume flow
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src-tauri/src/provider_unavailability.rs')
+          s = p.read_text()
+          if 'pub fn list_open_events(' not in s:
+              marker = 'pub fn affected_appointments(c: &Connection, event_id: i64) -> Result<Vec<AffectedAppointment>, String> {'
+              insert = r'''pub fn list_open_events(c: &Connection) -> Result<Vec<ProviderUnavailabilityEvent>, String> {
+    let mut stmt = c
+        .prepare(
+            "SELECT id,doctor_id,unavailable_from,unavailable_to,reason_code,reason_note,created_at,resolved_at
+             FROM provider_unavailability_events
+             WHERE resolved_at IS NULL
+             ORDER BY unavailable_from DESC,id DESC",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(ProviderUnavailabilityEvent {
+                id: r.get(0)?,
+                doctor_id: r.get(1)?,
+                unavailable_from: r.get(2)?,
+                unavailable_to: r.get(3)?,
+                reason_code: r.get(4)?,
+                reason_note: r.get(5)?,
+                created_at: r.get(6)?,
+                resolved_at: r.get(7)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+}
+
+'''
+              assert marker in s
+              s = s.replace(marker, insert + marker)
+          p.write_text(s)
+
+          p = Path('src-tauri/src/lib.rs')
+          s = p.read_text()
+          if 'fn provider_unavailability_list_open(' not in s:
+              marker = '#[tauri::command]\nfn provider_unavailability_create('
+              command = '''#[tauri::command]\nfn provider_unavailability_list_open(\n    db: tauri::State<Db>,\n    actor_token: Option<String>,\n) -> Result<Vec<provider_unavailability::ProviderUnavailabilityEvent>, String> {\n    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;\n    with_db(&db, provider_unavailability::list_open_events)\n}\n'''
+              assert marker in s
+              s = s.replace(marker, command + marker)
+          if '            provider_unavailability_list_open,\n' not in s:
+              marker = '            provider_unavailability_create,\n'
+              assert marker in s
+              s = s.replace(marker, '            provider_unavailability_list_open,\n' + marker)
+          p.write_text(s)
+
+          p = Path('src/api.ts')
+          s = p.read_text()
+          if 'export type ProviderUnavailabilityEvent=' not in s:
+              marker = '\n\nexport const api={'
+              types = '''\nexport type ProviderUnavailabilityEvent={id:number;doctorId:number;unavailableFrom:string;unavailableTo:string;reasonCode:string;reasonNote?:string;createdAt:string;resolvedAt?:string};\nexport type ProviderUnavailabilityInput={doctorId:number;unavailableFrom:string;unavailableTo:string;reasonCode:'leave'|'sudden_absence'|'assignment_meeting'|'emergency'|'other';reasonNote?:string};\nexport type AffectedAppointment={appointmentId:number;patientId:number;fileNo:number;patientName:string;clinicId?:number;doctorId?:number;startsAt:string;endsAt:string;status:string};\nexport type ProviderUnavailabilityResolution={appointmentId:number;actionType:'transfer'|'reschedule'|'cancel';replacementDoctorId?:number;newStartsAt?:string};\n'''
+              assert marker in s
+              s = s.replace(marker, types + '\nexport const api={')
+          if 'providerUnavailabilityOpen:' not in s:
+              marker = "appointmentStatus:(id:number,status:string)=>authed<void>('appointment_status',{id,status}),"
+              methods = marker + "providerUnavailabilityOpen:()=>authed<ProviderUnavailabilityEvent[]>('provider_unavailability_list_open'),createProviderUnavailability:(input:ProviderUnavailabilityInput)=>authed<ProviderUnavailabilityEvent>('provider_unavailability_create',{input}),providerUnavailabilityAffected:(eventId:number)=>authed<AffectedAppointment[]>('provider_unavailability_affected',{eventId}),resolveProviderUnavailability:(eventId:number,resolutions:ProviderUnavailabilityResolution[])=>authed<void>('provider_unavailability_resolve_many',{eventId,resolutions}),"
+              assert marker in s
+              s = s.replace(marker, methods)
+          p.write_text(s)
+
+          component = r'''import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { CalendarX2, RefreshCw, Stethoscope } from 'lucide-react';
+import {
+  AffectedAppointment,
+  api,
+  Doctor,
+  ProviderUnavailabilityEvent,
+  ProviderUnavailabilityInput,
+  ProviderUnavailabilityResolution,
+} from './api';
+
+const pad = (n: number) => String(n).padStart(2, '0');
+const todayAt = (hour: number) => {
+  const d = new Date();
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(hour)}:00`;
+};
+const reasonLabels: Record<string, string> = {
+  leave: 'إجازة',
+  sudden_absence: 'غياب مفاجئ',
+  assignment_meeting: 'تكليف أو اجتماع',
+  emergency: 'طارئ',
+  other: 'سبب آخر',
+};
+const formatDateTime = (value: string) => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  const text = d.toLocaleString('ar-SA-u-ca-gregory', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+  return `${text} • الشهر ${pad(d.getMonth() + 1)}`;
+};
+
+type ActionType = '' | 'transfer' | 'reschedule' | 'cancel';
+type ResolutionDraft = {
+  actionType: ActionType;
+  replacementDoctorId?: number;
+  newStartsAt?: string;
+};
+
+const blankInput = (): ProviderUnavailabilityInput => ({
+  doctorId: 0,
+  unavailableFrom: todayAt(9),
+  unavailableTo: todayAt(17),
+  reasonCode: 'sudden_absence',
+  reasonNote: '',
+});
+
+export function ProviderUnavailabilityCard() {
+  const [doctors, setDoctors] = useState<Doctor[]>([]);
+  const [events, setEvents] = useState<ProviderUnavailabilityEvent[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<number | null>(null);
+  const [affected, setAffected] = useState<AffectedAppointment[]>([]);
+  const [drafts, setDrafts] = useState<Record<number, ResolutionDraft>>({});
+  const [form, setForm] = useState<ProviderUnavailabilityInput>(blankInput());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [ok, setOk] = useState('');
+
+  const activeDoctors = useMemo(() => doctors.filter((d) => d.isActive !== false), [doctors]);
+  const selectedEvent = useMemo(
+    () => events.find((event) => event.id === selectedEventId) ?? null,
+    [events, selectedEventId],
+  );
+
+  const refresh = async (preferredEventId?: number) => {
+    const [doctorRows, eventRows] = await Promise.all([api.doctors(), api.providerUnavailabilityOpen()]);
+    const active = doctorRows.filter((d) => d.isActive !== false);
+    setDoctors(active);
+    setEvents(eventRows);
+    setForm((current) => current.doctorId || active.length === 0 ? current : { ...current, doctorId: active[0].id });
+    const candidate = preferredEventId ?? selectedEventId;
+    if (candidate && eventRows.some((event) => event.id === candidate)) setSelectedEventId(candidate);
+    else setSelectedEventId(eventRows[0]?.id ?? null);
+  };
+
+  useEffect(() => {
+    void refresh().catch((e) => setError(String(e)));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedEventId) {
+      setAffected([]);
+      setDrafts({});
+      return;
+    }
+    let cancelled = false;
+    void api.providerUnavailabilityAffected(selectedEventId)
+      .then((rows) => {
+        if (cancelled) return;
+        setAffected(rows);
+        setDrafts(Object.fromEntries(rows.map((row) => [row.appointmentId, { actionType: '' as ActionType }])));
+      })
+      .catch((e) => !cancelled && setError(String(e)));
+    return () => { cancelled = true; };
+  }, [selectedEventId]);
+
+  const createEvent = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    if (!form.doctorId) {
+      setError('اختر الطبيب أو مقدم الخدمة أولًا');
+      return;
+    }
+    if (!form.unavailableFrom || !form.unavailableTo || form.unavailableTo <= form.unavailableFrom) {
+      setError('يجب أن تكون نهاية فترة التعذر بعد بدايتها');
+      return;
+    }
+    if (form.reasonCode === 'other' && !form.reasonNote?.trim()) {
+      setError('اكتب سبب التعذر عند اختيار سبب آخر');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    setOk('');
+    try {
+      const created = await api.createProviderUnavailability({
+        ...form,
+        reasonNote: form.reasonNote?.trim() || undefined,
+      });
+      await refresh(created.id);
+      setSelectedEventId(created.id);
+      setOk('تم تسجيل فترة التعذر. راجع المواعيد المتأثرة ثم اختر الإجراء المناسب لكل موعد.');
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const setDraft = (appointmentId: number, patch: Partial<ResolutionDraft>) => {
+    setDrafts((current) => ({
+      ...current,
+      [appointmentId]: { ...(current[appointmentId] ?? { actionType: '' }), ...patch },
+    }));
+  };
+
+  const resolveSelected = async () => {
+    if (busy || !selectedEventId) return;
+    setError('');
+    setOk('');
+    const resolutions: ProviderUnavailabilityResolution[] = [];
+    for (const row of affected) {
+      const draft = drafts[row.appointmentId];
+      if (!draft?.actionType) continue;
+      if (draft.actionType === 'transfer' && !draft.replacementDoctorId) {
+        setError(`اختر الطبيب البديل للموعد الخاص بالمريض ${row.patientName}`);
+        return;
+      }
+      if (draft.actionType === 'reschedule' && !draft.newStartsAt) {
+        setError(`حدد الموعد الجديد للمريض ${row.patientName}`);
+        return;
+      }
+      resolutions.push({
+        appointmentId: row.appointmentId,
+        actionType: draft.actionType,
+        replacementDoctorId: draft.replacementDoctorId || undefined,
+        newStartsAt: draft.newStartsAt || undefined,
+      });
+    }
+    if (resolutions.length === 0) {
+      setError('اختر إجراءً لموعد واحد على الأقل');
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.resolveProviderUnavailability(selectedEventId, resolutions);
+      const remaining = await api.providerUnavailabilityAffected(selectedEventId);
+      if (remaining.length === 0) {
+        await refresh();
+        setOk('تمت معالجة جميع المواعيد المتأثرة وإغلاق حالة تعذر الطبيب.');
+      } else {
+        setAffected(remaining);
+        setDrafts(Object.fromEntries(remaining.map((row) => [row.appointmentId, { actionType: '' as ActionType }])));
+        setOk(`تم تنفيذ المعالجات المحددة. بقي ${remaining.length} موعد يحتاج قرارًا.`);
+      }
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectedDoctorName = selectedEvent
+    ? activeDoctors.find((doctor) => doctor.id === selectedEvent.doctorId)?.name ?? `الطبيب رقم ${selectedEvent.doctorId}`
+    : '';
+
+  return (
+    <div className="card providerUnavailabilityCard" aria-busy={busy}>
+      <div className="cardHeading"><CalendarX2 aria-hidden="true" /><div><h2>تعذّر الطبيب والمواعيد المتأثرة</h2><p>سجّل الغياب أو الإجازة ثم عالج المواعيد دون فقدان أثرها في سجل التدقيق.</p></div></div>
+      {error && <div className="notice errorText" role="alert">{error}</div>}
+      {ok && <div className="notice successText" role="status" aria-live="polite">{ok}</div>}
+
+      <form onSubmit={createEvent}>
+        <div className="formGrid">
+          <label>الطبيب أو مقدم الخدمة<span>*</span><select disabled={busy || activeDoctors.length === 0} value={form.doctorId || ''} onChange={(e) => setForm({ ...form, doctorId: Number(e.target.value) })}><option value="">اختر</option>{activeDoctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select></label>
+          <label>سبب التعذر<span>*</span><select disabled={busy} value={form.reasonCode} onChange={(e) => setForm({ ...form, reasonCode: e.target.value as ProviderUnavailabilityInput['reasonCode'] })}>{Object.entries(reasonLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label>من<span>*</span><input disabled={busy} type="datetime-local" min="1950-01-01T00:00" max="2050-12-31T23:59" value={form.unavailableFrom} onChange={(e) => setForm({ ...form, unavailableFrom: e.target.value })} /></label>
+          <label>إلى<span>*</span><input disabled={busy} type="datetime-local" min="1950-01-01T00:00" max="2050-12-31T23:59" value={form.unavailableTo} onChange={(e) => setForm({ ...form, unavailableTo: e.target.value })} /></label>
+          <label className="full">ملاحظة السبب{form.reasonCode === 'other' ? <span>*</span> : null}<input disabled={busy} maxLength={250} value={form.reasonNote ?? ''} onChange={(e) => setForm({ ...form, reasonNote: e.target.value })} placeholder="تفاصيل مختصرة عند الحاجة" /></label>
+        </div>
+        <button type="submit" className="primary" disabled={busy || activeDoctors.length === 0}><Stethoscope aria-hidden="true" />تسجيل التعذر وفحص المواعيد</button>
+      </form>
+
+      <div className="cardHeading"><RefreshCw aria-hidden="true" /><div><h3>الحالات المفتوحة</h3><p>يمكن استكمال أي حالة غير منتهية حتى بعد إغلاق البرنامج وفتحه من جديد.</p></div></div>
+      {events.length === 0 ? (
+        <div className="emptyState"><CalendarX2 aria-hidden="true" /><b>لا توجد حالات تعذر مفتوحة</b><span>عند تسجيل غياب طبيب ستظهر المواعيد المتأثرة هنا.</span></div>
+      ) : (
+        <>
+          <label className="full">الحالة المفتوحة<select disabled={busy} value={selectedEventId ?? ''} onChange={(e) => setSelectedEventId(Number(e.target.value))}>{events.map((item) => {
+            const doctor = activeDoctors.find((row) => row.id === item.doctorId)?.name ?? `طبيب ${item.doctorId}`;
+            return <option key={item.id} value={item.id}>{doctor} — {reasonLabels[item.reasonCode] ?? item.reasonCode} — {formatDateTime(item.unavailableFrom)}</option>;
+          })}</select></label>
+          {selectedEvent && <div className="notice"><strong>{selectedDoctorName}</strong> • {reasonLabels[selectedEvent.reasonCode] ?? selectedEvent.reasonCode}<br />من {formatDateTime(selectedEvent.unavailableFrom)} إلى {formatDateTime(selectedEvent.unavailableTo)}{selectedEvent.reasonNote ? <> • {selectedEvent.reasonNote}</> : null}</div>}
+          {affected.length === 0 ? (
+            <div className="emptyState"><CalendarX2 aria-hidden="true" /><b>لا توجد مواعيد نشطة متأثرة</b><span>سيغلق النظام الحالة تلقائيًا بعد تنفيذ آخر معالجة.</span></div>
+          ) : (
+            <div className="tableCard">
+              <table>
+                <thead><tr><th>المريض</th><th>الموعد الأصلي</th><th>الإجراء</th><th>تفاصيل المعالجة</th></tr></thead>
+                <tbody>{affected.map((row) => {
+                  const draft = drafts[row.appointmentId] ?? { actionType: '' as ActionType };
+                  const replacements = activeDoctors.filter((doctor) => doctor.id !== selectedEvent?.doctorId);
+                  return <tr key={row.appointmentId}>
+                    <td><strong>{row.patientName}</strong><br /><small>ملف رقم <bdi>{row.fileNo}</bdi></small></td>
+                    <td>{formatDateTime(row.startsAt)}</td>
+                    <td><select disabled={busy} value={draft.actionType} onChange={(e) => setDraft(row.appointmentId, { actionType: e.target.value as ActionType, replacementDoctorId: undefined, newStartsAt: undefined })}><option value="">اختر قرارًا</option><option value="transfer">تحويل لطبيب بديل</option><option value="reschedule">إعادة جدولة</option><option value="cancel">إلغاء بسبب تعذر الطبيب</option></select></td>
+                    <td>{draft.actionType === 'transfer' ? <select disabled={busy} value={draft.replacementDoctorId ?? ''} onChange={(e) => setDraft(row.appointmentId, { replacementDoctorId: Number(e.target.value) || undefined })}><option value="">اختر الطبيب البديل</option>{replacements.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select> : draft.actionType === 'reschedule' ? <div className="rowActions"><input disabled={busy} type="datetime-local" min="1950-01-01T00:00" max="2050-12-31T23:59" value={draft.newStartsAt ?? ''} onChange={(e) => setDraft(row.appointmentId, { newStartsAt: e.target.value })} /><select disabled={busy} value={draft.replacementDoctorId ?? ''} onChange={(e) => setDraft(row.appointmentId, { replacementDoctorId: Number(e.target.value) || undefined })}><option value="">نفس الطبيب بعد عودته</option>{replacements.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.name}</option>)}</select></div> : draft.actionType === 'cancel' ? <span>سيُسجّل الإلغاء كتعذر طبيب وليس كعدم حضور للمريض.</span> : <span className="muted">اختر الإجراء أولًا.</span>}</td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+          )}
+          {affected.length > 0 && <button type="button" className="primary" disabled={busy} onClick={() => void resolveSelected()}>تنفيذ المعالجات المحددة</button>}
+        </>
+      )}
+    </div>
+  );
+}
+'''
+          Path('src/ProviderUnavailabilityCard.tsx').write_text(component)
+
+          p = Path('src/SchedulingPage.tsx')
+          s = p.read_text()
+          import_line = "import { ProviderUnavailabilityCard } from './ProviderUnavailabilityCard';\n"
+          if import_line not in s:
+              marker = "import { api, ClosureDate, SchedulingSettings } from './api';\n"
+              assert marker in s
+              s = s.replace(marker, marker + import_line)
+          if '<ProviderUnavailabilityCard />' not in s:
+              marker = '        <div className="card">\n          <div className="cardHeading"><DatabaseBackup aria-hidden="true" />'
+              assert marker in s
+              s = s.replace(marker, '        <ProviderUnavailabilityCard />\n' + marker)
+          p.write_text(s)
+          PY
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          npm ci
+          npm run build
+          cargo test --manifest-path src-tauri/Cargo.toml --all-targets
+      - name: Commit provider unavailability UI integration
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/src/provider_unavailability.rs src-tauri/src/lib.rs src/api.ts src/ProviderUnavailabilityCard.tsx src/SchedulingPage.tsx
+          git commit -m "Integrate provider unavailability workflow UI"
+          git push origin HEAD:tauri-react-rebuild
