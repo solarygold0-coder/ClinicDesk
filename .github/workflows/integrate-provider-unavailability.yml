@@ -1,0 +1,65 @@
+name: integrate-provider-unavailability
+on:
+  push:
+    branches: [tauri-react-rebuild]
+permissions:
+  contents: write
+concurrency:
+  group: integrate-provider-unavailability
+  cancel-in-progress: true
+jobs:
+  integrate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Register schema, module and Tauri commands
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path('src-tauri/src/lib.rs')
+          s = p.read_text()
+          if 'pub mod provider_unavailability;' not in s:
+              s = s.replace('pub mod patients;\n', 'pub mod patients;\npub mod provider_unavailability;\n')
+          s = s.replace('const LATEST_SCHEMA_VERSION: i64 = 16;', 'const LATEST_SCHEMA_VERSION: i64 = 17;')
+          migration_marker = '''        (\n            16,\n            include_str!("../migrations/016_role_capability_grants.sql"),\n        ),\n'''
+          migration_insert = migration_marker + '''        (\n            17,\n            include_str!("../migrations/017_provider_unavailability.sql"),\n        ),\n'''
+          if '../migrations/017_provider_unavailability.sql' not in s:
+              assert migration_marker in s
+              s = s.replace(migration_marker, migration_insert)
+
+          command_marker = '''#[tauri::command]\nfn visit_tracking_update(\n'''
+          commands = '''#[tauri::command]\nfn provider_unavailability_create(\n    db: tauri::State<Db>,\n    actor_token: Option<String>,\n    input: provider_unavailability::ProviderUnavailabilityInput,\n) -> Result<provider_unavailability::ProviderUnavailabilityEvent, String> {\n    authorize_command(\n        &db,\n        actor_token.as_deref(),\n        authorization::APPOINTMENT_WRITE,\n    )?;\n    with_db(&db, |c| provider_unavailability::create_event(c, input))\n}\n#[tauri::command]\nfn provider_unavailability_affected(\n    db: tauri::State<Db>,\n    actor_token: Option<String>,\n    event_id: i64,\n) -> Result<Vec<provider_unavailability::AffectedAppointment>, String> {\n    authorize_command(\n        &db,\n        actor_token.as_deref(),\n        authorization::APPOINTMENT_READ,\n    )?;\n    with_db(&db, |c| {\n        provider_unavailability::affected_appointments(c, event_id)\n    })\n}\n#[tauri::command]\nfn provider_unavailability_resolve_many(\n    db: tauri::State<Db>,\n    actor_token: Option<String>,\n    event_id: i64,\n    resolutions: Vec<provider_unavailability::ResolutionInput>,\n) -> Result<(), String> {\n    authorize_command(\n        &db,\n        actor_token.as_deref(),\n        authorization::APPOINTMENT_WRITE,\n    )?;\n    with_db(&db, |c| {\n        provider_unavailability::resolve_many(c, event_id, resolutions)\n    })\n}\n'''
+          if 'fn provider_unavailability_create(' not in s:
+              assert command_marker in s
+              s = s.replace(command_marker, commands + command_marker)
+
+          handler_marker = '''            appointment_status,\n'''
+          handlers = handler_marker + '''            provider_unavailability_create,\n            provider_unavailability_affected,\n            provider_unavailability_resolve_many,\n'''
+          if '            provider_unavailability_create,\n' not in s:
+              assert handler_marker in s
+              s = s.replace(handler_marker, handlers)
+          p.write_text(s)
+
+          p = Path('src-tauri/src/migration_tests.rs')
+          s = p.read_text()
+          s = s.replace('assert_eq!(schema_version(&db).unwrap(), 16);', 'assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);')
+          if 'fn provider_unavailability_schema_is_present()' not in s:
+              s += '''\n#[test]\nfn provider_unavailability_schema_is_present() {\n    let db = fresh();\n    migrate_db(&db).unwrap();\n    assert_eq!(schema_version(&db).unwrap(), 17);\n    let mut stmt = db.prepare("PRAGMA table_info(appointments)").unwrap();\n    let columns = stmt\n        .query_map([], |r| r.get::<_, String>(1))\n        .unwrap()\n        .collect::<Result<Vec<_>, _>>()\n        .unwrap();\n    for required in [\n        "disruption_kind",\n        "disruption_reason_code",\n        "disruption_resolution",\n        "provider_unavailability_event_id",\n        "original_appointment_id",\n        "replacement_appointment_id",\n    ] {\n        assert!(columns.iter().any(|c| c == required), "missing {required}");\n    }\n    let events: i64 = db\n        .query_row(\n            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='provider_unavailability_events'",\n            [],\n            |r| r.get(0),\n        )\n        .unwrap();\n    let actions: i64 = db\n        .query_row(\n            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='provider_unavailability_actions'",\n            [],\n            |r| r.get(0),\n        )\n        .unwrap();\n    assert_eq!(events, 1);\n    assert_eq!(actions, 1);\n}\n'''
+          p.write_text(s)
+          PY
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+      - name: Commit runtime integration
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/src/lib.rs src-tauri/src/migration_tests.rs
+          git commit -m "Register provider unavailability runtime and schema 17"
+          git push origin HEAD:tauri-react-rebuild
