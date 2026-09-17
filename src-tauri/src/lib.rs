@@ -26,6 +26,7 @@ use std::{
     sync::Mutex,
 };
 use tauri::Manager;
+use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 pub struct Db(pub Mutex<Connection>);
 const LATEST_SCHEMA_VERSION: i64 = 17;
@@ -502,6 +503,51 @@ fn attachment_import(
     })
 }
 #[tauri::command]
+fn attachment_open(
+    app: tauri::AppHandle,
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    id: i64,
+) -> Result<(), String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::ATTACHMENT_READ)?;
+    let root = attachment_root(&app)?;
+    let path = with_db(&db, |c| {
+        let (stored_name, size_bytes, expected_sha): (String, i64, String) = c
+            .query_row(
+                "SELECT stored_name,size_bytes,sha256 FROM attachments WHERE id=?1 AND deleted_at IS NULL",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .map_err(|_| "المرفق غير موجود أو مؤرشف".to_string())?;
+        if stored_name.is_empty()
+            || Path::new(&stored_name)
+                .file_name()
+                .and_then(|value| value.to_str())
+                != Some(stored_name.as_str())
+        {
+            return Err("اسم المرفق المخزن غير صالح".into());
+        }
+        let path = root.join(&stored_name);
+        let metadata =
+            fs::metadata(&path).map_err(|_| "ملف المرفق مفقود من مجلد البرنامج".to_string())?;
+        if !metadata.is_file() || metadata.len() != size_bytes as u64 {
+            return Err("حجم ملف المرفق لا يطابق السجل؛ لن يتم فتحه".into());
+        }
+        if backup::sha256_file(&path)? != expected_sha.to_ascii_lowercase() {
+            return Err("فشل التحقق من بصمة المرفق؛ لن يتم فتحه".into());
+        }
+        Ok(path)
+    })?;
+    let path_string = path
+        .to_str()
+        .ok_or_else(|| "مسار المرفق غير صالح".to_string())?
+        .to_owned();
+    app.opener()
+        .open_path(path_string, None::<&str>)
+        .map_err(|e| format!("تعذر فتح المرفق بواسطة Windows: {e}"))
+}
+
+#[tauri::command]
 fn attachment_archive(
     db: tauri::State<Db>,
     actor_token: Option<String>,
@@ -810,6 +856,7 @@ fn audit_recent(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
@@ -822,6 +869,7 @@ pub fn run() {
             auth_commands::auth_login,
             auth_commands::auth_logout,
             auth_commands::auth_validate_session,
+            auth_commands::auth_change_password,
             auth_commands::user_list,
             auth_commands::user_create,
             auth_commands::user_update,
@@ -863,6 +911,7 @@ pub fn run() {
             attachment_list,
             attachment_archived_list,
             attachment_import,
+            attachment_open,
             attachment_archive,
             attachment_restore,
             scheduling_settings_get,

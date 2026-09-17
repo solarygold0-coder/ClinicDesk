@@ -40,7 +40,7 @@ export function UsersPage({ currentUser, onLifecycle }: { currentUser: UserSumma
     if (busy) return;
     setBusy(true); setError(''); setOk('');
     try {
-      if (form.password.length < 10) throw new Error('كلمة المرور يجب ألا تقل عن 10 أحرف');
+      if (form.password.length < 4) throw new Error('كلمة المرور يجب ألا تقل عن 4 خانات');
       await api.createUser(form.username.trim(), form.displayName.trim(), form.password, form.roleType);
       setForm(blank);
       await load();
@@ -64,7 +64,7 @@ export function UsersPage({ currentUser, onLifecycle }: { currentUser: UserSumma
     if (busy) return;
     const password = window.prompt(`كلمة المرور الجديدة للمستخدم ${user.displayName}`, '') || '';
     if (!password) return;
-    if (password.length < 10) { setError('كلمة المرور يجب ألا تقل عن 10 أحرف'); return; }
+    if (password.length < 4) { setError('كلمة المرور يجب ألا تقل عن 4 خانات'); return; }
     setBusy(true); setError(''); setOk('');
     try {
       await api.resetUserPassword(user.id, password);

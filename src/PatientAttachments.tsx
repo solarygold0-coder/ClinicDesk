@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { openPath } from '@tauri-apps/plugin-opener';
-import { appDataDir, join } from '@tauri-apps/api/path';
 import { Archive, ExternalLink, FilePlus2, Paperclip, Printer, RotateCcw } from 'lucide-react';
 import { api, Attachment } from './api';
 
@@ -65,8 +63,7 @@ export function PatientAttachments({ patientId }: { patientId: number }) {
     if (busy) return;
     setError('');
     try {
-      const root = await appDataDir();
-      await openPath(await join(root, 'attachments', item.storedName));
+      await api.openAttachment(item.id);
     } catch (e) {
       setError(
         `تعذر فتح المرفق. تأكد من وجود برنامج في Windows يدعم صيغة ${extensionLabel(item.originalName)}. ${String(e)}`,

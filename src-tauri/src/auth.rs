@@ -124,6 +124,9 @@ fn clear_runtime_actor(db: &Connection, session_id: &str) -> Result<(), String> 
 
 pub fn hash_password(password: &str) -> Result<String, String> {
     let password = required(password, "كلمة المرور")?;
+    if password.chars().count() < 4 {
+        return Err("كلمة المرور يجب ألا تقل عن 4 خانات".into());
+    }
     let salt = SaltString::encode_b64(Uuid::new_v4().as_bytes())
         .map_err(|_| "تعذر إنشاء بصمة كلمة المرور".to_string())?;
     Argon2::default()

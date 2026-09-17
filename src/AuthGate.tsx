@@ -78,7 +78,7 @@ export function AuthGate({ onAuthenticated }: { onAuthenticated: (session: AuthS
     try {
       if (mode === 'changePassword') {
         if (!pendingSession) throw new Error('جلسة تغيير كلمة المرور غير متاحة؛ سجل الدخول مجددًا');
-        if (newPassword.length < 10) throw new Error('كلمة المرور الجديدة يجب ألا تقل عن 10 أحرف');
+        if (newPassword.length < 4) throw new Error('كلمة المرور الجديدة يجب ألا تقل عن 4 خانات');
         if (newPassword !== confirmPassword) throw new Error('تأكيد كلمة المرور الجديدة غير مطابق');
         const user = await api.changePassword(pendingSession.token, password, newPassword);
         finish({ ...pendingSession, user });
@@ -86,7 +86,7 @@ export function AuthGate({ onAuthenticated }: { onAuthenticated: (session: AuthS
       }
       if (mode === 'setup') {
         if (displayName.trim().length < 2) throw new Error('اسم المدير مطلوب');
-        if (password.length < 10) throw new Error('كلمة المرور الأولى يجب ألا تقل عن 10 أحرف');
+        if (password.length < 4) throw new Error('كلمة المرور الأولى يجب ألا تقل عن 4 خانات');
         if (password !== confirmPassword) throw new Error('تأكيد كلمة المرور غير مطابق');
         await api.createUser(username.trim(), displayName.trim(), password, 'general_manager');
       }
