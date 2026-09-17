@@ -47,6 +47,7 @@ export function AuthGate({ onAuthenticated }: { onAuthenticated: (session: AuthS
             setError('يجب تسجيل الدخول بكلمة المرور المؤقتة ثم تعيين كلمة مرور جديدة.');
             return;
           }
+          setActorToken(saved);
           finish(restored);
           return;
         } catch {
