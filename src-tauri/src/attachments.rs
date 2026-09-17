@@ -1,5 +1,6 @@
 #![allow(clippy::too_many_arguments)]
-use rusqlite::{params, Connection};
+use crate::audit;
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -7,6 +8,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use uuid::Uuid;
+
 const MAX_ATTACHMENT_BYTES: u64 = 25 * 1024 * 1024;
 const MAX_ACTIVE_ATTACHMENTS: i64 = 20;
 const BLOCKED_EXTENSIONS: &[&str] = &[
@@ -14,6 +16,7 @@ const BLOCKED_EXTENSIONS: &[&str] = &[
     "wsf", "wsh", "hta", "lnk", "url", "reg", "dll", "sys", "cpl", "jar", "html", "htm", "xhtml",
     "svg", "chm",
 ];
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attachment {
@@ -30,6 +33,36 @@ pub struct Attachment {
     pub deleted_at: Option<String>,
     pub deleted_reason: Option<String>,
 }
+
+fn map_attachment(r: &rusqlite::Row) -> rusqlite::Result<Attachment> {
+    Ok(Attachment {
+        id: r.get(0)?,
+        patient_id: r.get(1)?,
+        stored_name: r.get(2)?,
+        original_name: r.get(3)?,
+        display_name: r.get(4)?,
+        category: r.get(5)?,
+        mime_type: r.get(6)?,
+        size_bytes: r.get(7)?,
+        sha256: r.get(8)?,
+        created_at: r.get(9)?,
+        deleted_at: r.get(10)?,
+        deleted_reason: r.get(11)?,
+    })
+}
+
+const ATTACHMENT_SELECT: &str = "SELECT id,patient_id,stored_name,original_name,COALESCE(display_name,original_name),category,mime_type,size_bytes,sha256,created_at,deleted_at,deleted_reason FROM attachments";
+
+fn get_by_id(conn: &Connection, id: i64) -> Result<Option<Attachment>, String> {
+    conn.query_row(
+        &format!("{ATTACHMENT_SELECT} WHERE id=?1"),
+        [id],
+        map_attachment,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 fn query_list(
     conn: &Connection,
     patient_id: i64,
@@ -40,35 +73,25 @@ fn query_list(
     } else {
         "deleted_at IS NULL"
     };
-    let sql=format!("SELECT id,patient_id,stored_name,original_name,COALESCE(display_name,original_name),category,mime_type,size_bytes,sha256,created_at,deleted_at,deleted_reason FROM attachments WHERE patient_id=?1 AND {predicate} ORDER BY created_at DESC,id DESC");
+    let sql = format!(
+        "{ATTACHMENT_SELECT} WHERE patient_id=?1 AND {predicate} ORDER BY created_at DESC,id DESC"
+    );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![patient_id], |r| {
-            Ok(Attachment {
-                id: r.get(0)?,
-                patient_id: r.get(1)?,
-                stored_name: r.get(2)?,
-                original_name: r.get(3)?,
-                display_name: r.get(4)?,
-                category: r.get(5)?,
-                mime_type: r.get(6)?,
-                size_bytes: r.get(7)?,
-                sha256: r.get(8)?,
-                created_at: r.get(9)?,
-                deleted_at: r.get(10)?,
-                deleted_reason: r.get(11)?,
-            })
-        })
+        .query_map(params![patient_id], map_attachment)
         .map_err(|e| e.to_string())?;
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
 }
+
 pub fn list(conn: &Connection, patient_id: i64) -> Result<Vec<Attachment>, String> {
     query_list(conn, patient_id, false)
 }
+
 pub fn list_archived(conn: &Connection, patient_id: i64) -> Result<Vec<Attachment>, String> {
     query_list(conn, patient_id, true)
 }
+
 fn ensure_patient(conn: &Connection, patient_id: i64) -> Result<(), String> {
     let exists: i64 = conn
         .query_row(
@@ -83,6 +106,7 @@ fn ensure_patient(conn: &Connection, patient_id: i64) -> Result<(), String> {
         Ok(())
     }
 }
+
 fn extension(path: &Path) -> Result<String, String> {
     let ext = path
         .extension()
@@ -94,6 +118,7 @@ fn extension(path: &Path) -> Result<String, String> {
     }
     Ok(ext)
 }
+
 fn mime_for(ext: &str) -> &'static str {
     match ext {
         "pdf" => "application/pdf",
@@ -120,6 +145,7 @@ fn mime_for(ext: &str) -> &'static str {
         _ => "application/octet-stream",
     }
 }
+
 fn safe_stored_path(root: &Path, stored_name: &str) -> Result<PathBuf, String> {
     if stored_name.is_empty()
         || Path::new(stored_name).file_name().and_then(|v| v.to_str()) != Some(stored_name)
@@ -128,6 +154,7 @@ fn safe_stored_path(root: &Path, stored_name: &str) -> Result<PathBuf, String> {
     }
     Ok(root.join(stored_name))
 }
+
 fn validate_label(value: &str, field: &str) -> Result<String, String> {
     let v = value.trim();
     if v.is_empty() || v.chars().count() > 120 || v.chars().any(|c| c.is_control()) {
@@ -135,6 +162,7 @@ fn validate_label(value: &str, field: &str) -> Result<String, String> {
     }
     Ok(v.to_string())
 }
+
 fn active_count(conn: &Connection, patient_id: i64) -> Result<i64, String> {
     conn.query_row(
         "SELECT COUNT(*) FROM attachments WHERE patient_id=?1 AND deleted_at IS NULL",
@@ -143,6 +171,36 @@ fn active_count(conn: &Connection, patient_id: i64) -> Result<i64, String> {
     )
     .map_err(|e| e.to_string())
 }
+
+fn audit_attachment(
+    conn: &Connection,
+    event_type: &str,
+    attachment: &Attachment,
+    before_json: Option<&str>,
+    after_json: Option<&str>,
+    reason: Option<&str>,
+) -> Result<(), String> {
+    let details = serde_json::json!({
+        "patientId": attachment.patient_id,
+        "displayName": &attachment.display_name,
+        "category": &attachment.category,
+    })
+    .to_string();
+    audit::record_as(
+        conn,
+        event_type,
+        "attachment",
+        Some(attachment.id),
+        Some(&details),
+        &audit::AuditActor::default(),
+        &audit::AuditChange {
+            before_json,
+            after_json,
+            reason,
+        },
+    )
+}
+
 pub fn import_file(
     conn: &Connection,
     patient_id: i64,
@@ -151,6 +209,7 @@ pub fn import_file(
 ) -> Result<i64, String> {
     import_file_named(conn, patient_id, source, root, None, None)
 }
+
 pub fn import_file_named(
     conn: &Connection,
     patient_id: i64,
@@ -204,6 +263,7 @@ pub fn import_file_named(
         }
     }
 }
+
 pub fn add(
     conn: &Connection,
     patient_id: i64,
@@ -225,6 +285,7 @@ pub fn add(
         sha256,
     )
 }
+
 pub fn add_named(
     conn: &Connection,
     patient_id: i64,
@@ -254,50 +315,54 @@ pub fn add_named(
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute("INSERT INTO attachments(patient_id,stored_name,original_name,display_name,category,mime_type,size_bytes,sha256) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![patient_id,stored_name,original_name,label,category,mime_type,size_bytes,sha256]).map_err(|e|if e.to_string().contains("attachment_limit_20"){"الحد الأقصى للمرفقات النشطة للمريض هو 20 مرفقاً".to_string()}else{e.to_string()})?;
     let id = tx.last_insert_rowid();
-    let details =
-        serde_json::json!({"attachmentId":id,"displayName":display_name,"category":category})
-            .to_string();
-    tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_added','patient',?1,?2)",params![patient_id,details]).map_err(|e|e.to_string())?;
+    let attachment = get_by_id(&tx, id)?.ok_or_else(|| "تعذر قراءة المرفق بعد الحفظ".to_string())?;
+    let after_json = serde_json::to_string(&attachment).map_err(|e| e.to_string())?;
+    audit_attachment(
+        &tx,
+        "attachment_added",
+        &attachment,
+        None,
+        Some(&after_json),
+        None,
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(id)
 }
+
 pub fn archive(conn: &Connection, id: i64, reason: &str) -> Result<(), String> {
     let reason = validate_label(reason, "سبب الأرشفة")?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    let patient_id: i64 = tx
-        .query_row(
-            "SELECT patient_id FROM attachments WHERE id=?1 AND deleted_at IS NULL",
-            params![id],
-            |r| r.get(0),
-        )
-        .map_err(|_| "المرفق غير موجود أو مؤرشف مسبقاً".to_string())?;
+    let before = get_by_id(&tx, id)?
+        .filter(|attachment| attachment.deleted_at.is_none())
+        .ok_or_else(|| "المرفق غير موجود أو مؤرشف مسبقاً".to_string())?;
+    let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
     tx.execute(
         "UPDATE attachments SET deleted_at=CURRENT_TIMESTAMP,deleted_reason=?2 WHERE id=?1",
-        params![id, reason],
+        params![id, &reason],
     )
     .map_err(|e| e.to_string())?;
-    let details = serde_json::json!({"attachmentId":id,"reason":reason}).to_string();
-    tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_archived','patient',?1,?2)",params![patient_id,details]).map_err(|e|e.to_string())?;
+    let after = get_by_id(&tx, id)?.ok_or_else(|| "تعذر قراءة المرفق بعد الأرشفة".to_string())?;
+    let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
+    audit_attachment(
+        &tx,
+        "attachment_archived",
+        &after,
+        Some(&before_json),
+        Some(&after_json),
+        Some(&reason),
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
+
 pub fn restore(conn: &Connection, id: i64, reason: &str) -> Result<(), String> {
     let reason = validate_label(reason, "سبب الاستعادة")?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-    let patient_id: i64 = tx
-        .query_row(
-            "SELECT patient_id FROM attachments WHERE id=?1 AND deleted_at IS NOT NULL",
-            params![id],
-            |r| r.get(0),
-        )
-        .map_err(|_| "المرفق غير موجود أو غير مؤرشف".to_string())?;
-    let count: i64 = tx
-        .query_row(
-            "SELECT COUNT(*) FROM attachments WHERE patient_id=?1 AND deleted_at IS NULL",
-            params![patient_id],
-            |r| r.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let before = get_by_id(&tx, id)?
+        .filter(|attachment| attachment.deleted_at.is_some())
+        .ok_or_else(|| "المرفق غير موجود أو غير مؤرشف".to_string())?;
+    let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
+    let count = active_count(&tx, before.patient_id)?;
     if count >= MAX_ACTIVE_ATTACHMENTS {
         return Err("لا يمكن الاستعادة: المريض لديه 20 مرفقاً نشطاً".into());
     }
@@ -312,14 +377,24 @@ pub fn restore(conn: &Connection, id: i64, reason: &str) -> Result<(), String> {
             e.to_string()
         }
     })?;
-    let details = serde_json::json!({"attachmentId":id,"reason":reason}).to_string();
-    tx.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES('attachment_restored','patient',?1,?2)",params![patient_id,details]).map_err(|e|e.to_string())?;
+    let after = get_by_id(&tx, id)?.ok_or_else(|| "تعذر قراءة المرفق بعد الاستعادة".to_string())?;
+    let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
+    audit_attachment(
+        &tx,
+        "attachment_restored",
+        &after,
+        Some(&before_json),
+        Some(&after_json),
+        Some(&reason),
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(include_str!("../migrations/001_init.sql"))
@@ -330,6 +405,16 @@ mod tests {
             "../migrations/015_attachment_restore_limit.sql"
         ))
         .unwrap();
+        conn.execute_batch(
+            "ALTER TABLE audit_log ADD COLUMN actor_user_id INTEGER;
+             ALTER TABLE audit_log ADD COLUMN actor_display_name TEXT;
+             ALTER TABLE audit_log ADD COLUMN actor_employee_code TEXT;
+             ALTER TABLE audit_log ADD COLUMN actor_session_id TEXT;
+             ALTER TABLE audit_log ADD COLUMN before_json TEXT;
+             ALTER TABLE audit_log ADD COLUMN after_json TEXT;
+             ALTER TABLE audit_log ADD COLUMN reason TEXT;",
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
             [],
@@ -337,6 +422,7 @@ mod tests {
         .unwrap();
         conn
     }
+
     #[test]
     fn lifecycle_preserves_metadata_and_archive_is_discoverable() {
         let conn = db();
@@ -362,6 +448,58 @@ mod tests {
         assert_eq!(list(&conn, 1).unwrap().len(), 1);
         assert!(list_archived(&conn, 1).unwrap().is_empty());
     }
+
+    #[test]
+    fn lifecycle_audit_uses_attachment_entity_and_before_after() {
+        let conn = db();
+        let id = add_named(
+            &conn,
+            1,
+            "audit.pdf",
+            "audit.pdf",
+            "تقرير مراجعة",
+            Some("تقارير"),
+            Some("application/pdf"),
+            10,
+            &"b".repeat(64),
+        )
+        .unwrap();
+        let (entity_type, entity_id, after_added): (String, i64, String) = conn
+            .query_row(
+                "SELECT entity_type,entity_id,after_json FROM audit_log WHERE event_type='attachment_added' ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(entity_type, "attachment");
+        assert_eq!(entity_id, id);
+        assert!(after_added.contains("تقرير مراجعة"));
+
+        archive(&conn, id, "مراجعة منتهية").unwrap();
+        let (before_archive, after_archive, archive_reason): (String, String, String) = conn
+            .query_row(
+                "SELECT before_json,after_json,reason FROM audit_log WHERE event_type='attachment_archived' ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(before_archive.contains("\"deletedAt\":null"));
+        assert!(after_archive.contains("مراجعة منتهية"));
+        assert_eq!(archive_reason, "مراجعة منتهية");
+
+        restore(&conn, id, "إعادة فتح المرفق").unwrap();
+        let (before_restore, after_restore, restore_reason): (String, String, String) = conn
+            .query_row(
+                "SELECT before_json,after_json,reason FROM audit_log WHERE event_type='attachment_restored' ORDER BY id DESC LIMIT 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert!(before_restore.contains("مراجعة منتهية"));
+        assert!(after_restore.contains("\"deletedAt\":null"));
+        assert_eq!(restore_reason, "إعادة فتح المرفق");
+    }
+
     #[test]
     fn enforces_twenty_active_attachments() {
         let conn = db();
@@ -379,6 +517,7 @@ mod tests {
         }
         assert!(add(&conn, 1, "20.pdf", "x.pdf", None, 1, &"a".repeat(64)).is_err());
     }
+
     #[test]
     fn archive_frees_slot_but_restore_respects_limit() {
         let conn = db();
@@ -408,6 +547,7 @@ mod tests {
         .unwrap();
         assert!(restore(&conn, first, "محاولة استعادة").is_err());
     }
+
     #[test]
     fn blocks_executable_and_active_content_extensions() {
         for name in [
@@ -434,6 +574,7 @@ mod tests {
             assert!(extension(Path::new(name)).is_ok(), "{name} must be allowed");
         }
     }
+
     #[test]
     fn common_formats_get_specific_mime_types() {
         assert_eq!(mime_for("pdf"), "application/pdf");
@@ -444,6 +585,7 @@ mod tests {
         assert_eq!(mime_for("dcm"), "application/dicom");
         assert_eq!(mime_for("unknownsafe"), "application/octet-stream");
     }
+
     #[test]
     fn rejects_path_traversal() {
         let conn = db();
