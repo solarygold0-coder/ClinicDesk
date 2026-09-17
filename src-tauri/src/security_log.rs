@@ -3,6 +3,8 @@ use sha2::{Digest, Sha256};
 use std::{fs, io::Write, path::Path};
 use uuid::Uuid;
 
+const MAX_DETAIL_CHARS: usize = 240;
+
 #[derive(Serialize)]
 struct SecurityEvent<'a> {
     event_id: String,
@@ -19,6 +21,29 @@ fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+fn safe_detail(details: Option<&str>) -> Option<String> {
+    details.map(|raw| {
+        let mut value = raw
+            .replace('\r', " ")
+            .replace('\n', " ")
+            .replace('\\', "/");
+        for marker in ["password", "passwd", "token", "secret", "authorization", "bearer"] {
+            if value.to_ascii_lowercase().contains(marker) {
+                return "تفاصيل حساسة محجوبة".to_string();
+            }
+        }
+        // External security events must not become a second store for patient data or local paths.
+        if value.contains(":/") || value.starts_with('/') || value.contains("/Users/") {
+            return "تفاصيل المسار محجوبة".to_string();
+        }
+        if value.chars().count() > MAX_DETAIL_CHARS {
+            value = value.chars().take(MAX_DETAIL_CHARS).collect();
+            value.push('…');
+        }
+        value
+    })
+}
+
 fn canonical_hash(value: &serde_json::Value) -> Result<String, String> {
     let canonical = serde_json::json!({
         "event_id": value.get("event_id").and_then(|v| v.as_str()).ok_or_else(|| "سجل الأمان الخارجي يفتقد معرف الحدث".to_string())?,
@@ -29,11 +54,7 @@ fn canonical_hash(value: &serde_json::Value) -> Result<String, String> {
         "details": value.get("details").cloned().unwrap_or(serde_json::Value::Null),
         "previous_hash": value.get("previous_hash").and_then(|v| v.as_str()).ok_or_else(|| "سجل الأمان الخارجي يفتقد بصمة الحدث السابق".to_string())?,
     });
-    Ok(hash_bytes(
-        serde_json::to_string(&canonical)
-            .map_err(|e| e.to_string())?
-            .as_bytes(),
-    ))
+    Ok(hash_bytes(serde_json::to_string(&canonical).map_err(|e| e.to_string())?.as_bytes()))
 }
 
 pub fn verify(path: &Path) -> Result<String, String> {
@@ -45,16 +66,12 @@ pub fn verify(path: &Path) -> Result<String, String> {
     for line in content.lines().filter(|line| !line.trim().is_empty()) {
         let value: serde_json::Value = serde_json::from_str(line)
             .map_err(|_| "سجل الأمان الخارجي تالف ولا يمكن التحقق من سلسلة البصمات".to_string())?;
-        let previous = value
-            .get("previous_hash")
-            .and_then(|v| v.as_str())
+        let previous = value.get("previous_hash").and_then(|v| v.as_str())
             .ok_or_else(|| "سجل الأمان الخارجي لا يحتوي بصمة سابقة صالحة".to_string())?;
         if previous != expected_previous {
             return Err("تم اكتشاف انقطاع أو تعديل في سلسلة سجل الأمان الخارجي".to_string());
         }
-        let stored = value
-            .get("event_hash")
-            .and_then(|v| v.as_str())
+        let stored = value.get("event_hash").and_then(|v| v.as_str())
             .ok_or_else(|| "سجل الأمان الخارجي لا يحتوي بصمة حدث صالحة".to_string())?;
         let calculated = canonical_hash(&value)?;
         if stored != calculated {
@@ -78,36 +95,29 @@ pub fn append(
     let previous_hash = verify(path)?;
     let event_id = Uuid::new_v4().to_string();
     let occurred_at = chrono::Utc::now().to_rfc3339();
+    let safe_details = safe_detail(details);
     let canonical = serde_json::json!({
         "event_id": event_id,
         "occurred_at": occurred_at,
         "event_type": event_type,
         "status": status,
         "reference": reference,
-        "details": details,
+        "details": safe_details.as_deref(),
         "previous_hash": previous_hash,
     });
-    let event_hash = hash_bytes(
-        serde_json::to_string(&canonical)
-            .map_err(|e| e.to_string())?
-            .as_bytes(),
-    );
+    let event_hash = hash_bytes(serde_json::to_string(&canonical).map_err(|e| e.to_string())?.as_bytes());
     let event = SecurityEvent {
         event_id: canonical["event_id"].as_str().unwrap().to_string(),
         occurred_at: canonical["occurred_at"].as_str().unwrap().to_string(),
         event_type,
         status,
         reference,
-        details,
+        details: safe_details.as_deref(),
         previous_hash: canonical["previous_hash"].as_str().unwrap().to_string(),
         event_hash,
     };
     let line = serde_json::to_string(&event).map_err(|e| e.to_string())?;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|e| e.to_string())?;
+    let mut file = fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
     writeln!(file, "{line}").map_err(|e| e.to_string())?;
     file.sync_all().map_err(|e| e.to_string())?;
     Ok(event.event_id)
@@ -119,12 +129,10 @@ mod tests {
 
     #[test]
     fn events_form_a_hash_chain_and_detect_content_tampering() {
-        let path =
-            std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
         append(&path, "restore", "started", Some("RST-1"), None).unwrap();
         append(&path, "restore", "success", Some("RST-1"), Some("ok")).unwrap();
         assert_ne!(verify(&path).unwrap(), "GENESIS");
-
         let original = fs::read_to_string(&path).unwrap();
         let tampered = original.replace("\"status\":\"success\"", "\"status\":\"failure\"");
         assert_ne!(original, tampered);
@@ -136,8 +144,7 @@ mod tests {
 
     #[test]
     fn detects_deleted_or_reordered_chain_entries() {
-        let path =
-            std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
+        let path = std::env::temp_dir().join(format!("clinicdesk-security-{}.jsonl", Uuid::new_v4()));
         append(&path, "restore", "started", Some("RST-2"), None).unwrap();
         append(&path, "restore", "success", Some("RST-2"), None).unwrap();
         let content = fs::read_to_string(&path).unwrap();
@@ -145,5 +152,12 @@ mod tests {
         fs::write(&path, format!("{}\n", lines[1])).unwrap();
         assert!(verify(&path).is_err());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn redacts_sensitive_details_and_paths() {
+        assert_eq!(safe_detail(Some("password=abc")), Some("تفاصيل حساسة محجوبة".to_string()));
+        assert_eq!(safe_detail(Some("C:/Users/Test/backup.db")), Some("تفاصيل المسار محجوبة".to_string()));
+        assert_eq!(safe_detail(Some("integrity check failed")), Some("integrity check failed".to_string()));
     }
 }
