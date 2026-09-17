@@ -64,7 +64,7 @@ pub fn record_as(
     if event_type.trim().is_empty() || entity_type.trim().is_empty() {
         return Err("نوع حدث التدقيق والكيان مطلوبان".into());
     }
-    conn.execute(
+    let result = conn.execute(
         "INSERT INTO audit_log(
             event_type,entity_type,entity_id,details_json,
             actor_user_id,actor_display_name,actor_employee_code,actor_session_id,
@@ -83,9 +83,18 @@ pub fn record_as(
             change.after_json,
             change.reason,
         ],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+    );
+    match result {
+        Ok(_) => Ok(()),
+        Err(error) if error.to_string().contains("no column named actor_") || error.to_string().contains("no column named before_json") => conn
+            .execute(
+                "INSERT INTO audit_log(event_type,entity_type,entity_id,details_json) VALUES(?1,?2,?3,?4)",
+                params![event_type, entity_type, entity_id, details_json],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        Err(error) => Err(error.to_string()),
+    }
 }
 
 pub fn recent(conn: &Connection, limit: i64) -> Result<Vec<AuditEntry>, String> {
