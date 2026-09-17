@@ -451,14 +451,7 @@ fn backup_create(
     ) {
         Ok(hash) => hash,
         Err(error) => {
-            security_failure(
-                &log,
-                "backup",
-                &reference,
-                "backup_create",
-                &error,
-                None,
-            );
+            security_failure(&log, "backup", &reference, "backup_create", &error, None);
             return Err(error);
         }
     };
@@ -580,7 +573,9 @@ fn backup_restore(
     };
     match backup::restore_database(&mut g, source, &live_path, LATEST_SCHEMA_VERSION) {
         Ok(hash) => {
-            if let Err(error) = audit::record(&g, "restore_completed", "database", None, Some(&details)) {
+            if let Err(error) =
+                audit::record(&g, "restore_completed", "database", None, Some(&details))
+            {
                 security_failure(
                     &log,
                     "restore",
