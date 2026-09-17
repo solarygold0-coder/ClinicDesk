@@ -1,26 +1,33 @@
 -- Fixed user roles, permanent short employee codes and account lifecycle.
 -- Additive migration: preserves every historical user identity and audit record.
 
--- Existing v11 databases used U000001-style codes. v12 made the code immutable,
--- so normalization must temporarily remove only that trigger and immediately restore it.
 DROP TRIGGER IF EXISTS trg_users_employee_code_immutable;
 
--- Abort safely instead of silently creating an unsupported identity when more than 62
--- historical identities already exist.
-CREATE TEMP TRIGGER clinicdesk_v13_user_limit
+-- The legacy schema had no trustworthy fixed-role mapping. Refuse an ambiguous
+-- conversion instead of silently placing more than the approved 20 identities
+-- into the ordinary-employee role.
+CREATE TEMP TRIGGER clinicdesk_v13_legacy_role_limit
 BEFORE UPDATE OF employee_code ON users
-WHEN (SELECT COUNT(*) FROM users) > 62
+WHEN (SELECT COUNT(*) FROM users) > 20
 BEGIN
-  SELECT RAISE(ABORT, 'user_identity_limit_exceeded_62');
+  SELECT RAISE(ABORT, 'legacy_user_role_assignment_required_over_20');
 END;
 
--- Deterministic normalization by permanent database id. No identity is deleted or reused.
 UPDATE users
 SET employee_code = 'U' || printf('%02d', (
   SELECT COUNT(*) FROM users AS prior WHERE prior.id <= users.id
 ));
 
-DROP TRIGGER clinicdesk_v13_user_limit;
+DROP TRIGGER clinicdesk_v13_legacy_role_limit;
+
+-- Keep historical audit actor codes aligned with the permanent identity after
+-- the one-time U000001 -> U01 normalization. actor_user_id is authoritative.
+UPDATE audit_log
+SET actor_employee_code = (
+  SELECT users.employee_code FROM users WHERE users.id = audit_log.actor_user_id
+)
+WHERE actor_user_id IS NOT NULL
+  AND EXISTS(SELECT 1 FROM users WHERE users.id = audit_log.actor_user_id);
 
 UPDATE identity_sequences
 SET next_value = COALESCE((SELECT COUNT(*) + 1 FROM users), 1)
@@ -48,7 +55,6 @@ ON users(role_type,account_status);
 CREATE INDEX IF NOT EXISTS ix_users_last_login
 ON users(last_successful_login_at);
 
--- Role ceilings are enforced in the database as a second line of defence.
 CREATE TRIGGER IF NOT EXISTS trg_users_role_limit_insert
 BEFORE INSERT ON users
 BEGIN
