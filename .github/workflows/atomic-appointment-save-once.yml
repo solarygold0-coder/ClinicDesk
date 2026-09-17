@@ -1,0 +1,92 @@
+name: atomic-appointment-save-once
+on:
+  push:
+    branches: [tauri-react-rebuild]
+permissions:
+  contents: write
+concurrency:
+  group: atomic-appointment-save-once
+  cancel-in-progress: true
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tauri-react-rebuild
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Apply atomic appointment and visit tracking save
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def patch(path, old, new, count=None):
+              p=Path(path); text=p.read_text(encoding='utf-8')
+              hits=text.count(old)
+              if count is not None and hits != count:
+                  raise SystemExit(f'{path}: expected {count} matches, got {hits}')
+              if hits == 0:
+                  raise SystemExit(f'{path}: patch anchor not found')
+              p.write_text(text.replace(old,new), encoding='utf-8')
+
+          patch('src-tauri/src/appointments.rs','use crate::audit;','use crate::{audit, visit_tracking};',1)
+          patch('src-tauri/src/appointments.rs',
+          'pub fn create(c: &mut Connection, i: AppointmentInput) -> Result<Appointment, String> {\n',
+          'pub fn create(c: &mut Connection, i: AppointmentInput) -> Result<Appointment, String> {\n    create_with_visit(c, i, None)\n}\npub fn create_with_visit(\n    c: &mut Connection,\n    i: AppointmentInput,\n    visit: Option<visit_tracking::VisitTrackingInput>,\n) -> Result<Appointment, String> {\n',1)
+          patch('src-tauri/src/appointments.rs',
+          'pub fn update(c: &mut Connection, id: i64, i: AppointmentInput) -> Result<Appointment, String> {\n',
+          'pub fn update(c: &mut Connection, id: i64, i: AppointmentInput) -> Result<Appointment, String> {\n    update_with_visit(c, id, i, None)\n}\npub fn update_with_visit(\n    c: &mut Connection,\n    id: i64,\n    i: AppointmentInput,\n    visit: Option<visit_tracking::VisitTrackingInput>,\n) -> Result<Appointment, String> {\n',1)
+          patient_touch='''    tx.execute(\n        "UPDATE patients SET updated_at=CURRENT_TIMESTAMP WHERE id=?1",\n        [pid],\n    )\n    .map_err(|e| e.to_string())?;\n'''
+          patient_touch_with_visit=patient_touch+'''    if let Some(visit) = visit {\n        visit_tracking::update(&tx, id, visit)?;\n    }\n'''
+          patch('src-tauri/src/appointments.rs',patient_touch,patient_touch_with_visit,2)
+          patch('src-tauri/src/appointments.rs',
+          '''        c.execute_batch(include_str!("../migrations/003_scheduling_rules.sql"))\n            .unwrap();\n''',
+          '''        c.execute_batch(include_str!("../migrations/003_scheduling_rules.sql"))\n            .unwrap();\n        c.execute_batch(include_str!("../migrations/007_appointment_visit_tracking.sql"))\n            .unwrap();\n''',1)
+          tail='''    #[test]\n    fn appointment_lower_date_boundary_is_enforced() {\n        assert!(normalized(&i("1949-12-29T10:00")).is_err());\n    }\n}\n'''
+          tests='''    #[test]\n    fn appointment_and_visit_tracking_create_are_atomic() {\n        let mut c = db();\n        let invalid = crate::visit_tracking::VisitTrackingInput {\n            visit_type: "invalid".into(),\n            visit_stage: "scheduled".into(),\n            follow_up_at: None,\n        };\n        assert!(create_with_visit(&mut c, i("2026-09-20T10:00"), Some(invalid)).is_err());\n        let count: i64 = c.query_row("SELECT COUNT(*) FROM appointments", [], |r| r.get(0)).unwrap();\n        assert_eq!(count, 0);\n\n        let valid = crate::visit_tracking::VisitTrackingInput {\n            visit_type: "follow_up".into(),\n            visit_stage: "reception".into(),\n            follow_up_at: Some("2026-10-01T10:00:00".into()),\n        };\n        let created = create_with_visit(&mut c, i("2026-09-20T10:00"), Some(valid)).unwrap();\n        let tracking = crate::visit_tracking::get(&c, created.id).unwrap();\n        assert_eq!(tracking.visit_type, "follow_up");\n        assert_eq!(tracking.visit_stage, "reception");\n        assert_eq!(tracking.follow_up_at.as_deref(), Some("2026-10-01T10:00:00"));\n    }\n\n    #[test]\n    fn appointment_and_visit_tracking_update_are_atomic() {\n        let mut c = db();\n        let original = create(&mut c, i("2026-09-20T10:00")).unwrap();\n        let invalid = crate::visit_tracking::VisitTrackingInput {\n            visit_type: "invalid".into(),\n            visit_stage: "scheduled".into(),\n            follow_up_at: None,\n        };\n        assert!(update_with_visit(&mut c, original.id, i("2026-09-20T11:00"), Some(invalid)).is_err());\n        let after = get(&c, original.id).unwrap();\n        assert_eq!(after.starts_at, original.starts_at);\n    }\n\n'''+tail
+          patch('src-tauri/src/appointments.rs',tail,tests,1)
+
+          patch('src-tauri/src/lib.rs',
+          '''    input: appointments::AppointmentInput,\n) -> Result<appointments::Appointment, String> {\n    authorize_command(\n        &db,\n        actor_token.as_deref(),\n        authorization::APPOINTMENT_WRITE,\n    )?;\n    let mut g =\n        db.0.lock()\n            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;\n    appointments::create(&mut g, input)\n}\n#[tauri::command]\nfn appointment_update(\n''',
+          '''    input: appointments::AppointmentInput,\n    visit: Option<visit_tracking::VisitTrackingInput>,\n) -> Result<appointments::Appointment, String> {\n    authorize_command(\n        &db,\n        actor_token.as_deref(),\n        authorization::APPOINTMENT_WRITE,\n    )?;\n    let mut g =\n        db.0.lock()\n            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;\n    appointments::create_with_visit(&mut g, input, visit)\n}\n#[tauri::command]\nfn appointment_update(\n''',1)
+          patch('src-tauri/src/lib.rs',
+          '''    id: i64,\n    input: appointments::AppointmentInput,\n) -> Result<appointments::Appointment, String> {\n    authorize_command(\n        &db,\n        actor_token.as_deref(),\n        authorization::APPOINTMENT_WRITE,\n    )?;\n    let mut g =\n        db.0.lock()\n            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;\n    appointments::update(&mut g, id, input)\n}\n''',
+          '''    id: i64,\n    input: appointments::AppointmentInput,\n    visit: Option<visit_tracking::VisitTrackingInput>,\n) -> Result<appointments::Appointment, String> {\n    authorize_command(\n        &db,\n        actor_token.as_deref(),\n        authorization::APPOINTMENT_WRITE,\n    )?;\n    let mut g =\n        db.0.lock()\n            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;\n    appointments::update_with_visit(&mut g, id, input, visit)\n}\n''',1)
+
+          patch('src/api.ts',
+          "createAppointment:(input:AppointmentInput)=>authed<Appointment>('appointment_create',{input}),updateAppointment:(id:number,input:AppointmentInput)=>authed<Appointment>('appointment_update',{id,input}),",
+          "createAppointment:(input:AppointmentInput,visit:VisitTrackingInput)=>authed<Appointment>('appointment_create',{input,visit}),updateAppointment:(id:number,input:AppointmentInput,visit:VisitTrackingInput)=>authed<Appointment>('appointment_update',{id,input,visit}),",1)
+
+          patch('src/AppointmentsPage.tsx',
+          '''      let id = editing;\n      if (editing !== null) await api.updateAppointment(editing, form);\n      else id = (await api.createAppointment(form)).id;\n      if (id !== null) await api.updateVisitTracking(id, visit);\n''',
+          '''      if (editing !== null) await api.updateAppointment(editing, form, visit);\n      else await api.createAppointment(form, visit);\n''',1)
+
+          patch('scripts/visible-feature-contract.mjs',
+          "['patient file contains linked appointments',files.patients.includes('المواعيد المرتبطة بهذا الملف')&&files.patients.includes('api.patientAppointments(p.id, 100)')],\n",
+          "['patient file contains linked appointments',files.patients.includes('المواعيد المرتبطة بهذا الملف')&&files.patients.includes('api.patientAppointments(p.id, 100)')],\n['appointment and visit tracking save atomically',files.appointments.includes('api.updateAppointment(editing, form, visit)')&&files.appointments.includes('api.createAppointment(form, visit)')&&!files.appointments.includes('await api.updateVisitTracking(id, visit)')&&files.lib.includes('appointments::create_with_visit')&&files.lib.includes('appointments::update_with_visit')&&files.rust.includes('visit_tracking::update(&tx, id, visit)')],\n",1)
+          PY
+      - name: Format and validate atomic save
+        run: |
+          cargo fmt --all
+          npm install --ignore-scripts
+          npm run build
+          node scripts/visible-feature-contract.mjs
+          cargo test --manifest-path src-tauri/Cargo.toml appointments::tests -- --nocapture
+          cargo test --manifest-path src-tauri/Cargo.toml visit_tracking::tests -- --nocapture
+      - name: Commit verified atomic save
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/src/appointments.rs src-tauri/src/lib.rs src/api.ts src/AppointmentsPage.tsx scripts/visible-feature-contract.mjs
+          git commit -m "Save appointments and visit tracking atomically"
+          git pull --rebase origin tauri-react-rebuild
+          git push origin HEAD:tauri-react-rebuild
