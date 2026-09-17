@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Building2, CalendarDays, FileClock, LayoutDashboard, LogOut, Settings, UserCog, Users } from 'lucide-react';
+import { AlertTriangle, Building2, CalendarDays, FileClock, LayoutDashboard, LogOut, Settings, UserCog, Users } from 'lucide-react';
 import { Dashboard } from './Dashboard';
 import { PatientsPage } from './PatientsPage';
 import { DirectoryPage } from './DirectoryPage';
@@ -9,9 +9,10 @@ import { SchedulingPage } from './SchedulingPage';
 import { AuthGate } from './AuthGate';
 import { UsersPage } from './UsersPage';
 import { AuditPage } from './AuditPage';
+import { ProviderUnavailabilityPage } from './ProviderUnavailabilityPage';
 import { api, AuthSession, setActorToken } from './api';
 
-type Page='dashboard'|'patients'|'appointments'|'directory'|'settings'|'users'|'audit';
+type Page='dashboard'|'patients'|'appointments'|'provider-unavailability'|'directory'|'settings'|'users'|'audit';
 type PatientAction={kind:'add'|'search';token:number}|null;
 type AppointmentAction={kind:'add';token:number}|null;
 
@@ -65,6 +66,7 @@ export function App(){
         {!restrictedClinical&&<button aria-current={page==='dashboard'?'page':undefined} aria-keyshortcuts="Alt+1" className={page==='dashboard'?'active':''} onClick={()=>navigate('dashboard')}><LayoutDashboard aria-hidden="true"/>لوحة التحكم</button>}
         {!restrictedClinical&&<button aria-current={page==='patients'?'page':undefined} aria-keyshortcuts="Alt+2" className={page==='patients'?'active':''} onClick={()=>openPatients()}><Users aria-hidden="true"/>المرضى</button>}
         <button aria-current={page==='appointments'?'page':undefined} aria-keyshortcuts="Alt+3" className={page==='appointments'?'active':''} onClick={openAppointments}><CalendarDays aria-hidden="true"/>المواعيد</button>
+        {!restrictedClinical&&<button aria-current={page==='provider-unavailability'?'page':undefined} className={page==='provider-unavailability'?'active':''} onClick={()=>navigate('provider-unavailability')}><AlertTriangle aria-hidden="true"/>تعذّر المعالج</button>}
         {!restrictedClinical&&<button aria-current={page==='directory'?'page':undefined} className={page==='directory'?'active':''} onClick={()=>navigate('directory')}><Building2 aria-hidden="true"/>العيادات والأطباء</button>}
         {canManage&&<button aria-current={page==='users'?'page':undefined} className={page==='users'?'active':''} onClick={()=>navigate('users')}><UserCog aria-hidden="true"/>المستخدمون والصلاحيات</button>}
         {canManage&&<button aria-current={page==='audit'?'page':undefined} className={page==='audit'?'active':''} onClick={()=>{setAuditEmployee('');navigate('audit')}}><FileClock aria-hidden="true"/>سجل العمليات</button>}
@@ -81,6 +83,7 @@ export function App(){
       {page==='patients'&&!restrictedClinical&&<PatientsPage initialFileNo={patientFileNo} action={patientAction}/>} 
       {page==='directory'&&!restrictedClinical&&<DirectoryPage/>}
       {page==='appointments'&&(restrictedClinical?<ReadOnlyAppointmentsPage/>:<AppointmentsPage onPatient={openPatients} action={appointmentAction}/>)} 
+      {page==='provider-unavailability'&&!restrictedClinical&&<ProviderUnavailabilityPage/>} 
       {page==='settings'&&!restrictedClinical&&<SchedulingPage/>}
       {page==='users'&&canManage&&<UsersPage currentUser={session.user} onLifecycle={openLifecycle}/>} 
       {page==='audit'&&canManage&&<AuditPage initialEmployeeCode={auditEmployee}/>} 
