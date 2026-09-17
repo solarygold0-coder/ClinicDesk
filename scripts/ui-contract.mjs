@@ -4,6 +4,10 @@ const read = (path) => readFileSync(path, 'utf8');
 const tight = (text) => text.replace(/\s+/g, '');
 const files = {
   app: read('src/App.tsx'),
+  auth: read('src/AuthGate.tsx'),
+  users: read('src/UsersPage.tsx'),
+  audit: read('src/AuditPage.tsx'),
+  accountability: read('src/accountability.css'),
   main: read('src/main.tsx'),
   dashboard: read('src/Dashboard.tsx'),
   patients: read('src/PatientsPage.tsx'),
@@ -17,7 +21,7 @@ const files = {
   ui: read('src/ui-fixes.css'),
 };
 const t = Object.fromEntries(Object.entries(files).map(([key, value]) => [key, tight(value)]));
-const productText = [files.app, files.dashboard, files.patients, files.appointments, files.scheduling, files.directory, files.attachments].join('\n');
+const productText = [files.app, files.auth, files.users, files.audit, files.dashboard, files.patients, files.appointments, files.scheduling, files.directory, files.attachments].join('\n');
 
 const checks = [
   ['root app remains RTL', t.app.includes('className="app"dir="rtl"')],
@@ -25,6 +29,7 @@ const checks = [
   ['document direction is RTL', t.main.includes("document.documentElement.dir='rtl'")],
   ['RTL stylesheet enforces page direction and logical sidebar/mobile boundaries', files.main.includes("'./rtl.css'") && t.rtl.includes('.page{direction:rtl;text-align:start;}') && t.rtl.includes('.app>aside{border-inline-start:0;border-inline-end:1pxsolid#e6ebf1;}') && t.rtl.includes('.alertsPopover{inset-inline:20px;}') && !files.rtl.includes('left: 20px') && !files.rtl.includes('right: 20px')],
   ['UI hardening stylesheet is loaded', files.main.includes("'./ui-fixes.css'")],
+  ['accountability stylesheet is loaded', files.main.includes("'./accountability.css'") && t.accountability.includes('.authShell{') && t.accountability.includes('.usersPage') && t.accountability.includes('.auditPage')],
   ['print stylesheet is loaded', files.main.includes("'./print.css'")],
   ['F2 patient search shortcut exists', t.app.includes("event.key==='F2'")],
   ['Alt+1 dashboard shortcut exists', t.app.includes("event.key==='1'") && t.app.includes("navigate('dashboard')")],
@@ -32,12 +37,20 @@ const checks = [
   ['Alt+3 appointment shortcut exists', t.app.includes("event.key==='3'") && t.app.includes('openAppointments()')],
   ['primary navigation exposes current page', files.app.includes('aria-current=')],
   ['navigation has an accessible label', files.app.includes('aria-label="التنقل الرئيسي"')],
+  ['authentication gate blocks application until a session exists', t.app.includes('if(!session)return<AuthGate') && files.app.includes('onAuthenticated={setSession}')],
+  ['first-run setup creates only a general manager then logs in', t.auth.includes("api.createUser(username.trim(),displayName.trim(),password,'general_manager')") && t.auth.includes('api.login(username.trim(),password)')],
+  ['session token is restored validated and propagated', files.auth.includes("sessionStorage.getItem('clinicdesk.session')") && t.auth.includes('api.validateSession(saved)') && t.auth.includes('setActorToken(saved)')],
+  ['logout revokes session and clears frontend actor context', t.app.includes('api.logout(session.token)') && files.app.includes("sessionStorage.removeItem('clinicdesk.session')") && t.app.includes('setActorToken(null)')],
+  ['users and lifecycle navigation are role gated', files.app.includes('المستخدمون والصلاحيات') && files.app.includes('سجل العمليات') && t.app.includes("session?.user.roleType==='general_manager'||session?.user.roleType==='deputy_manager'")],
+  ['users page supports role status password and lifecycle controls', files.users.includes('إضافة مستخدم') && files.users.includes('دورة الحياة') && t.users.includes('api.setUserStatus(') && t.users.includes('api.resetUserPassword(') && t.users.includes('api.updateUser(')],
+  ['audit page exposes actor employee code and before-after details', files.audit.includes('دورة حياة الموظف وسجل العمليات') && files.audit.includes('actorEmployeeCode') && files.audit.includes('beforeJson') && files.audit.includes('afterJson')],
+  ['all operational API calls use authenticated wrapper', t.api.includes("constauthed=<T>(command:string,args:Record<string,unknown>={})=>invoke<T>(command,{...args,actorToken:actorToken??undefined})") && t.api.includes("patients:(query='')=>authed<Patient[]>('patient_list',{query,limit:50})") && t.api.includes("createBackup:(destinationPath:string)=>authed<string>('backup_create',{destinationPath})")],
   ['one-click patient action is wired', t.dashboard.includes('onClick={onPatientAdd}')],
   ['one-click appointment action is wired', t.dashboard.includes('onClick={onAppointmentAdd}')],
   ['one-click patient search is wired', t.dashboard.includes('onClick={onPatientSearch}')],
   ['patient quick action is consumed', t.patients.includes("action.kind==='add'")],
   ['appointment quick action is consumed', t.appointments.includes("action?.kind==='add'")],
-  ['patient search parameter matches backend contract', t.api.includes("patients:(query='')=>invoke<Patient[]>('patient_list',{query,limit:50})")],
+  ['patient search parameter matches authenticated backend contract', t.api.includes("patients:(query='')=>authed<Patient[]>('patient_list',{query,limit:50})")],
   ['patient birth dates start at 1950', files.patients.includes('min="1950-01-01"')],
   ['patient birth dates end at 2050', files.patients.includes('max="2050-12-31"')],
   ['appointment workday dates are bounded', files.appointments.includes('min="1950-01-01"') && files.appointments.includes('max="2050-12-31"')],
@@ -48,6 +61,7 @@ const checks = [
   ['dashboard display explicitly uses Gregorian calendar', files.dashboard.includes('ar-SA-u-ca-gregory')],
   ['settings display explicitly uses Gregorian calendar', files.scheduling.includes('ar-SA-u-ca-gregory')],
   ['attachment display explicitly uses Gregorian calendar', files.attachments.includes('ar-SA-u-ca-gregory')],
+  ['audit display explicitly uses Gregorian calendar', files.audit.includes('ar-SA-u-ca-gregory')],
   ['Hijri calendar markers are absent from product UI', !/(hijri|ummalqura|islamic|هجري)/i.test(productText)],
   ['print media gate exists', files.print.includes('@media print')],
   ['print output targets A4 portrait', files.print.includes('@page{size:A4 portrait')],
@@ -72,14 +86,14 @@ const checks = [
   ['dashboard accessibility semantics are present', files.dashboard.includes('aria-expanded={showAlerts}') && files.dashboard.includes('aria-pressed={filter === key}') && files.dashboard.includes('role="alert"')],
 ];
 
-if (checks.length !== 50) {
-  console.error(`RTL/UI contract definition must contain exactly 50 checks, found ${checks.length}`);
+if (checks.length !== 60) {
+  console.error(`RTL/UI/accountability contract definition must contain exactly 60 checks, found ${checks.length}`);
   process.exit(1);
 }
 const failed = checks.filter(([, ok]) => !ok);
 for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'} ${name}`);
 if (failed.length) {
-  console.error(`RTL/UI contract failed: ${failed.length} check(s)`);
+  console.error(`RTL/UI/accountability contract failed: ${failed.length} check(s)`);
   process.exit(1);
 }
-console.log(`RTL/UI contract passed: ${checks.length}/${checks.length}`);
+console.log(`RTL/UI/accountability contract passed: ${checks.length}/${checks.length}`);
