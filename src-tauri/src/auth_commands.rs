@@ -4,10 +4,9 @@ fn with_db<T>(
     db: &tauri::State<Db>,
     f: impl FnOnce(&rusqlite::Connection) -> Result<T, String>,
 ) -> Result<T, String> {
-    let guard = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let guard =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     f(&guard)
 }
 
@@ -59,10 +58,9 @@ pub fn user_create(
     password: String,
     role_type: String,
 ) -> Result<auth::UserSummary, String> {
-    let mut guard = db
-        .0
-        .lock()
-        .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
+    let mut guard =
+        db.0.lock()
+            .map_err(|_| "تعذر الوصول إلى قاعدة البيانات".to_string())?;
     let count: i64 = guard
         .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
         .map_err(|e| e.to_string())?;
@@ -169,8 +167,8 @@ pub fn user_set_status(
         }
         let before = user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود".to_string())?;
         auth::set_status(conn, id, status.clone(), reason.clone())?;
-        let after = user_by_id(conn, id)?
-            .ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
+        let after =
+            user_by_id(conn, id)?.ok_or_else(|| "المستخدم غير موجود بعد التحديث".to_string())?;
         let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
         let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
         let details = serde_json::json!({"status":status}).to_string();
@@ -234,12 +232,9 @@ pub fn deputy_restore_permission_set(
     enabled: bool,
 ) -> Result<(), String> {
     with_db(&db, |conn| {
-        let actor = authorization::authorize(
-            conn,
-            actor_token.as_deref(),
-            authorization::SECURITY_MANAGE,
-        )?
-        .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
+        let actor =
+            authorization::authorize(conn, actor_token.as_deref(), authorization::SECURITY_MANAGE)?
+                .ok_or_else(|| "تسجيل الدخول مطلوب لتعديل صلاحيات الأمان".to_string())?;
         authorization::set_deputy_restore_grant(conn, actor_token.as_deref(), enabled)?;
         let details = serde_json::json!({"enabled":enabled}).to_string();
         audit::record_as(
