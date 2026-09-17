@@ -15,60 +15,39 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: tauri-react-rebuild
-      - name: Wire frontend API, navigation and stylesheet
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Extend regression contract for provider unavailability
         run: |
           python - <<'PY'
           from pathlib import Path
-
-          p = Path('src/api.ts')
+          p = Path('scripts/ui-contract.mjs')
           s = p.read_text()
-          type_marker = "export type AppointmentInput={patientFileNo:number;clinicId?:number;doctorId?:number;startsAt:string;durationMinutes:number;notes?:string};\n"
-          provider_types = """export type ProviderUnavailabilityReason='leave'|'sudden_absence'|'assignment_meeting'|'emergency'|'other';\nexport type ProviderUnavailabilityInput={doctorId:number;unavailableFrom:string;unavailableTo:string;reasonCode:ProviderUnavailabilityReason;reasonNote?:string};\nexport type ProviderUnavailabilityEvent={id:number;doctorId:number;unavailableFrom:string;unavailableTo:string;reasonCode:ProviderUnavailabilityReason;reasonNote?:string;createdAt:string;resolvedAt?:string};\nexport type AffectedAppointment={appointmentId:number;patientId:number;fileNo:number;patientName:string;clinicId?:number;doctorId?:number;startsAt:string;endsAt:string;status:string};\nexport type ProviderResolutionAction='transfer'|'reschedule'|'cancel';\nexport type ProviderResolutionInput={appointmentId:number;actionType:ProviderResolutionAction;replacementDoctorId?:number;newStartsAt?:string};\n"""
-          if 'export type ProviderUnavailabilityReason=' not in s:
-              assert type_marker in s
-              s = s.replace(type_marker, type_marker + provider_types)
-          api_marker = "appointmentStatus:(id:number,status:string)=>authed<void>('appointment_status',{id,status}),"
-          provider_api = "createProviderUnavailability:(input:ProviderUnavailabilityInput)=>authed<ProviderUnavailabilityEvent>('provider_unavailability_create',{input}),providerUnavailabilityAffected:(eventId:number)=>authed<AffectedAppointment[]>('provider_unavailability_affected',{eventId}),resolveProviderUnavailability:(eventId:number,resolutions:ProviderResolutionInput[])=>authed<void>('provider_unavailability_resolve_many',{eventId,resolutions}),"
-          if 'createProviderUnavailability:' not in s:
-              assert api_marker in s
-              s = s.replace(api_marker, api_marker + provider_api)
-          p.write_text(s)
-
-          p = Path('src/App.tsx')
-          s = p.read_text()
+          if "providerUnavailability: read('src/ProviderUnavailabilityPage.tsx')" not in s:
+              s = s.replace(
+                  "  attachments: read('src/PatientAttachments.tsx'),\n",
+                  "  attachments: read('src/PatientAttachments.tsx'),\n  providerUnavailability: read('src/ProviderUnavailabilityPage.tsx'),\n  providerCss: read('src/provider-unavailability.css'),\n  providerRust: read('src-tauri/src/provider_unavailability.rs'),\n  providerMigration: read('src-tauri/migrations/017_provider_unavailability.sql'),\n  runtime: read('src-tauri/src/lib.rs'),\n",
+              )
           s = s.replace(
-              "import { Building2, CalendarDays, FileClock, LayoutDashboard, LogOut, Settings, UserCog, Users } from 'lucide-react';",
-              "import { AlertTriangle, Building2, CalendarDays, FileClock, LayoutDashboard, LogOut, Settings, UserCog, Users } from 'lucide-react';",
+              "files.scheduling, files.directory, files.attachments].join('\\n');",
+              "files.scheduling, files.directory, files.attachments, files.providerUnavailability].join('\\n');",
           )
-          if "import { ProviderUnavailabilityPage } from './ProviderUnavailabilityPage';" not in s:
-              s = s.replace("import { AuditPage } from './AuditPage';\n", "import { AuditPage } from './AuditPage';\nimport { ProviderUnavailabilityPage } from './ProviderUnavailabilityPage';\n")
-          s = s.replace(
-              "type Page='dashboard'|'patients'|'appointments'|'directory'|'settings'|'users'|'audit';",
-              "type Page='dashboard'|'patients'|'appointments'|'provider-unavailability'|'directory'|'settings'|'users'|'audit';",
-          )
-          nav_marker = "        <button aria-current={page==='appointments'?'page':undefined} aria-keyshortcuts=\"Alt+3\" className={page==='appointments'?'active':''} onClick={openAppointments}><CalendarDays aria-hidden=\"true\"/>المواعيد</button>\n"
-          nav_provider = "        {!restrictedClinical&&<button aria-current={page==='provider-unavailability'?'page':undefined} className={page==='provider-unavailability'?'active':''} onClick={()=>navigate('provider-unavailability')}><AlertTriangle aria-hidden=\"true\"/>تعذّر المعالج</button>}\n"
-          if "page==='provider-unavailability'?'page':undefined" not in s:
-              assert nav_marker in s
-              s = s.replace(nav_marker, nav_marker + nav_provider)
-          main_marker = "      {page==='appointments'&&(restrictedClinical?<ReadOnlyAppointmentsPage/>:<AppointmentsPage onPatient={openPatients} action={appointmentAction}/>)} \n"
-          main_provider = "      {page==='provider-unavailability'&&!restrictedClinical&&<ProviderUnavailabilityPage/>} \n"
-          if "<ProviderUnavailabilityPage/>" not in s:
-              assert main_marker in s
-              s = s.replace(main_marker, main_marker + main_provider)
-          p.write_text(s)
-
-          p = Path('src/main.tsx')
-          s = p.read_text()
-          if "import './provider-unavailability.css';" not in s:
-              s = s.replace("import './accountability.css';\n", "import './accountability.css';\nimport './provider-unavailability.css';\n")
+          marker = "  ['one-click patient action is wired', t.dashboard.includes('onClick={onPatientAdd}')],\n"
+          provider_checks = """  ['provider unavailability navigation is visible only outside restricted clinical mode', files.app.includes('تعذّر المعالج') && t.app.includes(\"navigate('provider-unavailability')\") && t.app.includes(\"page==='provider-unavailability'&&!restrictedClinical&&<ProviderUnavailabilityPage/>\")],\n  ['provider unavailability stylesheet is loaded and responsive', files.main.includes(\"'./provider-unavailability.css'\") && t.providerCss.includes('.providerUnavailabilityPage') && t.providerCss.includes('@media(max-width:900px)')],\n  ['provider unavailability reasons are structured and other reason requires a note', ['leave','sudden_absence','assignment_meeting','emergency','other'].every((reason)=>files.providerUnavailability.includes(reason)) && files.providerUnavailability.includes(\"reasonCode === 'other'\") && files.providerUnavailability.includes('required={reasonCode === \'other\'}')],\n  ['provider unavailability supports transfer reschedule and classified cancellation', files.providerUnavailability.includes('تحويل لمعالج بديل') && files.providerUnavailability.includes('إعادة جدولة') && files.providerUnavailability.includes('إلغاء بسبب تعذّر المعالج') && t.providerUnavailability.includes(\"ProviderResolutionAction='transfer'|'reschedule'|'cancel'\")],\n  ['provider unavailability batches selected appointments atomically through one API call', files.providerUnavailability.includes('دفعة واحدة') && t.providerUnavailability.includes('api.resolveProviderUnavailability(event.id,resolutions)') && t.providerRust.includes('unchecked_transaction()')],\n  ['provider unavailability API commands use authenticated wrapper', t.api.includes(\"authed<ProviderUnavailabilityEvent>('provider_unavailability_create',{input})\") && t.api.includes(\"authed<AffectedAppointment[]>('provider_unavailability_affected',{eventId})\") && t.api.includes(\"authed<void>('provider_unavailability_resolve_many',{eventId,resolutions})\")],\n  ['provider unavailability backend checks working window replacement capacity and preserves classification', files.providerRust.includes('validate_work_window') && files.providerRust.includes('ensure_capacity') && files.providerRust.includes(\"disruption_kind='provider_unavailable'\") && files.providerRust.includes(\"disruption_resolution='cancel'\")],\n  ['provider unavailability schema 17 and Tauri runtime are registered end to end', files.providerMigration.includes('provider_unavailability_events') && files.providerMigration.includes('provider_unavailability_actions') && files.runtime.includes('const LATEST_SCHEMA_VERSION: i64 = 17;') && files.runtime.includes('../migrations/017_provider_unavailability.sql') && files.runtime.includes('provider_unavailability_resolve_many')],\n"""
+          if "provider unavailability navigation is visible only outside restricted clinical mode" not in s:
+              assert marker in s
+              s = s.replace(marker, provider_checks + marker)
+          s = s.replace('if (checks.length !== 62) {', 'if (checks.length !== 70) {')
+          s = s.replace('exactly 62 checks', 'exactly 70 checks')
           p.write_text(s)
           PY
-      - name: Commit frontend integration
+          node scripts/ui-contract.mjs
+      - name: Commit protected contract and remove one-time workflow
         run: |
-          if git diff --quiet; then exit 0; fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/api.ts src/App.tsx src/main.tsx
-          git commit -m "Expose provider unavailability workflow in application UI"
+          git rm .github/workflows/integrate-provider-unavailability.yml
+          git add scripts/ui-contract.mjs
+          git commit -m "Protect provider unavailability end-to-end requirements"
           git push origin HEAD:tauri-react-rebuild
