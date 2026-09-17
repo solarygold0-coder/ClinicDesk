@@ -4,12 +4,22 @@ body,
   direction: rtl;
 }
 
+.page {
+  direction: rtl;
+  text-align: start;
+}
+
+.app > aside {
+  border-inline-start: 0;
+  border-inline-end: 1px solid #e6ebf1;
+}
+
 body,
 button,
 input,
 select,
 textarea {
-  text-align: right;
+  text-align: start;
 }
 
 input,
@@ -61,12 +71,11 @@ th,
 td,
 .patientNameLink,
 .alertList button {
-  text-align: right;
+  text-align: start;
 }
 
 @media (max-width: 900px) {
   .alertsPopover {
-    left: 20px;
-    right: 20px;
+    inset-inline: 20px;
   }
 }
