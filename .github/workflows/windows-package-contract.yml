@@ -1,0 +1,26 @@
+name: Windows Package Contract
+
+on:
+  push:
+    branches: [main, tauri-react-rebuild]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: clinicdesk-windows-package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows-package-contract:
+    name: Windows package compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify Windows package invariants
+        run: node scripts/windows-package-contract.mjs
