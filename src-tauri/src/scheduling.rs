@@ -119,12 +119,19 @@ pub fn closures(c: &Connection) -> Result<Vec<ClosureDate>, String> {
 pub fn add_closure(c: &Connection, i: ClosureInput) -> Result<(), String> {
     NaiveDate::parse_from_str(&i.closure_date, "%Y-%m-%d")
         .map_err(|_| "تاريخ الإغلاق غير صالح".to_string())?;
-    let year = i.closure_date.get(0..4).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+    let year = i
+        .closure_date
+        .get(0..4)
+        .and_then(|v| v.parse::<i32>().ok())
+        .unwrap_or(0);
     if !(1950..=2050).contains(&year) {
         return Err("تاريخ الإغلاق يجب أن يكون بين 1950 و2050".into());
     }
     let closure_date = i.closure_date;
-    let reason = i.reason.map(|x| x.trim().to_string()).filter(|x| !x.is_empty());
+    let reason = i
+        .reason
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty());
     c.execute(
         "INSERT INTO closure_dates(closure_date,reason)VALUES(?1,?2)",
         params![closure_date, reason],
@@ -145,16 +152,27 @@ pub fn add_closure(c: &Connection, i: ClosureInput) -> Result<(), String> {
         Some(id),
         None,
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: None, after_json: Some(&after), reason: reason.as_deref() },
+        &audit::AuditChange {
+            before_json: None,
+            after_json: Some(&after),
+            reason: reason.as_deref(),
+        },
     )
 }
 
 pub fn delete_closure(c: &Connection, id: i64) -> Result<(), String> {
     let before: (String, Option<String>) = c
-        .query_row("SELECT closure_date,reason FROM closure_dates WHERE id=?1", [id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row(
+            "SELECT closure_date,reason FROM closure_dates WHERE id=?1",
+            [id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .map_err(|_| "تاريخ الإغلاق غير موجود".to_string())?;
-    let before_json = serde_json::json!({"id":id,"closureDate":before.0,"reason":before.1}).to_string();
-    let n = c.execute("DELETE FROM closure_dates WHERE id=?1", [id]).map_err(|e| e.to_string())?;
+    let before_json =
+        serde_json::json!({"id":id,"closureDate":before.0,"reason":before.1}).to_string();
+    let n = c
+        .execute("DELETE FROM closure_dates WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
     if n == 0 {
         return Err("تاريخ الإغلاق غير موجود".into());
     }
@@ -165,7 +183,11 @@ pub fn delete_closure(c: &Connection, id: i64) -> Result<(), String> {
         Some(id),
         None,
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: Some(&before_json), after_json: None, reason: before.1.as_deref() },
+        &audit::AuditChange {
+            before_json: Some(&before_json),
+            after_json: None,
+            reason: before.1.as_deref(),
+        },
     )
 }
 
@@ -174,34 +196,83 @@ mod tests {
     use super::*;
     fn db() -> Connection {
         let c = Connection::open_in_memory().unwrap();
-        c.execute_batch(include_str!("../migrations/001_init.sql")).unwrap();
-        c.execute_batch(include_str!("../migrations/003_scheduling_rules.sql")).unwrap();
+        c.execute_batch(include_str!("../migrations/001_init.sql"))
+            .unwrap();
+        c.execute_batch(include_str!("../migrations/003_scheduling_rules.sql"))
+            .unwrap();
         c
     }
     #[test]
     fn valid_settings_save() {
         let c = db();
-        assert!(update(&c,SchedulingSettings{work_start:"08:00".into(),work_end:"18:00".into(),break_start:Some("12:00".into()),break_end:Some("13:00".into()),slot_minutes:30}).is_ok());
+        assert!(update(
+            &c,
+            SchedulingSettings {
+                work_start: "08:00".into(),
+                work_end: "18:00".into(),
+                break_start: Some("12:00".into()),
+                break_end: Some("13:00".into()),
+                slot_minutes: 30
+            }
+        )
+        .is_ok());
     }
     #[test]
     fn invalid_hours_blocked() {
         let c = db();
-        assert!(update(&c,SchedulingSettings{work_start:"18:00".into(),work_end:"08:00".into(),break_start:None,break_end:None,slot_minutes:30}).is_err());
+        assert!(update(
+            &c,
+            SchedulingSettings {
+                work_start: "18:00".into(),
+                work_end: "08:00".into(),
+                break_start: None,
+                break_end: None,
+                slot_minutes: 30
+            }
+        )
+        .is_err());
     }
     #[test]
     fn partial_break_blocked() {
         let c = db();
-        assert!(update(&c,SchedulingSettings{work_start:"08:00".into(),work_end:"18:00".into(),break_start:Some("12:00".into()),break_end:None,slot_minutes:30}).is_err());
+        assert!(update(
+            &c,
+            SchedulingSettings {
+                work_start: "08:00".into(),
+                work_end: "18:00".into(),
+                break_start: Some("12:00".into()),
+                break_end: None,
+                slot_minutes: 30
+            }
+        )
+        .is_err());
     }
     #[test]
     fn closure_crud() {
         let c = db();
-        add_closure(&c,ClosureInput{closure_date:"2026-09-23".into(),reason:Some("إجازة".into())}).unwrap();
-        let x=closures(&c).unwrap();assert_eq!(x.len(),1);delete_closure(&c,x[0].id).unwrap();assert!(closures(&c).unwrap().is_empty());
+        add_closure(
+            &c,
+            ClosureInput {
+                closure_date: "2026-09-23".into(),
+                reason: Some("إجازة".into()),
+            },
+        )
+        .unwrap();
+        let x = closures(&c).unwrap();
+        assert_eq!(x.len(), 1);
+        delete_closure(&c, x[0].id).unwrap();
+        assert!(closures(&c).unwrap().is_empty());
     }
     #[test]
     fn closure_range_is_enforced_in_backend() {
-        let c=db();
-        assert!(add_closure(&c,ClosureInput{closure_date:"2051-01-01".into(),reason:None}).is_err());
+        let c = db();
+        assert!(add_closure(
+            &c,
+            ClosureInput {
+                closure_date: "2051-01-01".into(),
+                reason: None
+            }
+        )
+        .is_err());
     }
 }
