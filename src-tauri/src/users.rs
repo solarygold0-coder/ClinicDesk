@@ -246,8 +246,16 @@ mod tests {
 
         let err = create_with_role(&mut db, input(2), "general_manager").unwrap_err();
         assert!(err.contains("الحد الأقصى"));
-        let count: i64 = db.query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0)).unwrap();
-        let next: i64 = db.query_row("SELECT next_value FROM identity_sequences WHERE name='employee_code'", [], |r| r.get(0)).unwrap();
+        let count: i64 = db
+            .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+            .unwrap();
+        let next: i64 = db
+            .query_row(
+                "SELECT next_value FROM identity_sequences WHERE name='employee_code'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
         assert_eq!(count, 1);
         assert_eq!(next, 2);
 
