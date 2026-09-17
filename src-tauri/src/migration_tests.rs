@@ -26,8 +26,11 @@ fn migration_is_idempotent() {
 fn rejects_database_newer_than_supported_schema() {
     let db = fresh();
     migrate_db(&db).unwrap();
-    db.execute("UPDATE app_meta SET value = '16' WHERE key = 'schema_version'", [])
-        .unwrap();
+    db.execute(
+        "UPDATE app_meta SET value = '16' WHERE key = 'schema_version'",
+        [],
+    )
+    .unwrap();
     let err = migrate_db(&db).expect_err("future schema must be rejected");
     assert!(err.contains("أحدث من الإصدار"));
 }
@@ -101,8 +104,11 @@ fn attachment_lifecycle_columns_and_both_limit_triggers_exist() {
 fn database_rejects_restore_that_would_exceed_twenty_active_attachments() {
     let db = fresh();
     migrate_db(&db).unwrap();
-    db.execute("INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')", [])
-        .unwrap();
+    db.execute(
+        "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض')",
+        [],
+    )
+    .unwrap();
     for i in 0..20 {
         db.execute(
             "INSERT INTO attachments(patient_id,stored_name,original_name,display_name,size_bytes,sha256) VALUES(1,?1,?2,?2,1,?3)",
