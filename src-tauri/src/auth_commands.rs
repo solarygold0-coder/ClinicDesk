@@ -195,8 +195,8 @@ pub fn user_reset_password(
     id: i64,
     temporary_password: String,
 ) -> Result<(), String> {
-    if temporary_password.chars().count() < 4 {
-        return Err("كلمة المرور المؤقتة يجب ألا تقل عن 4 خانات".into());
+    if temporary_password.chars().count() != 4 {
+        return Err("كلمة المرور المؤقتة يجب أن تتكون من 4 خانات بالضبط".into());
     }
     with_db(&db, |conn| {
         let actor = authorize_user_management(conn, actor_token.as_deref())?
@@ -224,8 +224,8 @@ fn change_password(
     current_password: String,
     new_password: String,
 ) -> Result<auth::UserSummary, String> {
-    if new_password.chars().count() < 4 {
-        return Err("كلمة المرور الجديدة يجب ألا تقل عن 4 خانات".into());
+    if new_password.chars().count() != 4 {
+        return Err("كلمة المرور الجديدة يجب أن تتكون من 4 خانات بالضبط".into());
     }
     if current_password == new_password {
         return Err("كلمة المرور الجديدة يجب أن تختلف عن الحالية".into());

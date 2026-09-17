@@ -368,4 +368,42 @@ mod tests {
         deactivate_doctor(&c, x.id).unwrap();
         assert!(list_doctors(&c).unwrap().is_empty())
     }
+    #[test]
+    fn future_active_appointment_blocks_doctor_and_clinic_deactivation() {
+        let c = db();
+        let clinic = create_clinic(
+            &c,
+            ClinicInput {
+                name: "عيادة مرتبطة".into(),
+                phone: None,
+                address: None,
+            },
+        )
+        .unwrap();
+        let doctor = create_doctor(
+            &c,
+            DoctorInput {
+                clinic_id: Some(clinic.id),
+                name: "طبيب مرتبط".into(),
+                specialty: None,
+                phone: None,
+            },
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO patients(file_no,full_name) VALUES(1,'مريض مرتبط')",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "INSERT INTO appointments(patient_id,clinic_id,doctor_id,starts_at,ends_at,status) VALUES(1,?1,?2,'2099-01-01T10:00:00','2099-01-01T10:30:00','scheduled')",
+            rusqlite::params![clinic.id, doctor.id],
+        )
+        .unwrap();
+
+        assert!(deactivate_doctor(&c, doctor.id).is_err());
+        assert!(deactivate_clinic(&c, clinic.id).is_err());
+        assert_eq!(list_doctors(&c).unwrap().len(), 1);
+        assert_eq!(list_clinics(&c).unwrap().len(), 1);
+    }
 }

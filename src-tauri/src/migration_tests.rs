@@ -232,3 +232,39 @@ fn exact_four_password_policy_is_registered() {
     assert_eq!(policy, "exact-4-v1");
     assert_eq!(schema_version(&db).unwrap(), LATEST_SCHEMA_VERSION);
 }
+
+#[test]
+fn exact_four_password_migration_forces_only_active_accounts_to_change() {
+    let db = fresh();
+    migrate_db(&db).unwrap();
+    db.execute(
+        "INSERT INTO users(username,display_name,password_hash,employee_code,role_type,account_status,is_active,must_change_password) VALUES('active_old','نشط قديم','legacy','U61','ordinary_employee','ACTIVE',1,0)",
+        [],
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO users(username,display_name,password_hash,employee_code,role_type,account_status,is_active,must_change_password) VALUES('retired_old','متقاعد قديم','legacy','U62','ordinary_employee','RETIRED',0,0)",
+        [],
+    )
+    .unwrap();
+    db.execute_batch(include_str!(
+        "../migrations/018_exact_four_password_policy.sql"
+    ))
+    .unwrap();
+    let active: i64 = db
+        .query_row(
+            "SELECT must_change_password FROM users WHERE username='active_old'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let retired: i64 = db
+        .query_row(
+            "SELECT must_change_password FROM users WHERE username='retired_old'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(active, 1);
+    assert_eq!(retired, 0);
+}

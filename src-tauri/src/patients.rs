@@ -3,6 +3,8 @@ use chrono::{Datelike, NaiveDate};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 
+pub const MAX_ACTIVE_PATIENTS: i64 = 10_000;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Patient {
@@ -98,6 +100,16 @@ fn map_patient(r: &rusqlite::Row) -> rusqlite::Result<Patient> {
 const PATIENT_SELECT:&str="SELECT id,file_no,national_id,full_name,phone,birth_date,sex,medical_summary,chronic_diseases,allergies,notes FROM patients";
 pub fn create(conn: &mut Connection, input: PatientInput) -> Result<Patient, String> {
     let (name, nid, phone) = validate(&input)?;
+    let active_total: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM patients WHERE deleted_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    if active_total >= MAX_ACTIVE_PATIENTS {
+        return Err("تم بلوغ الحد الأقصى لملفات المرضى النشطة (10,000 مريض)".into());
+    }
     if let Some(v) = &nid {
         let exists: Option<i64> = conn
             .query_row(
@@ -351,5 +363,60 @@ mod tests {
             )
             .unwrap();
         assert!(activity.as_str() > "2010-01-01 00:00:00")
+    }
+    #[test]
+    fn ten_thousand_active_patient_limit_is_enforced_and_archive_frees_capacity() {
+        let mut c = db();
+        {
+            let tx = c.transaction().unwrap();
+            for n in 1..=MAX_ACTIVE_PATIENTS {
+                tx.execute(
+                    "INSERT INTO patients(file_no,full_name) VALUES(?1,'مريض سعة')",
+                    [n],
+                )
+                .unwrap();
+            }
+            tx.commit().unwrap();
+        }
+        let err = create(&mut c, input("مريض زائد", "1234567890")).unwrap_err();
+        assert!(err.contains("10,000"));
+
+        c.execute(
+            "UPDATE patients SET deleted_at=CURRENT_TIMESTAMP WHERE file_no=1",
+            [],
+        )
+        .unwrap();
+        c.execute(
+            "UPDATE app_meta SET value='10001' WHERE key='next_patient_file_no'",
+            [],
+        )
+        .unwrap();
+        let accepted = create(&mut c, input("مريض بديل", "1234567890")).unwrap();
+        assert_eq!(accepted.file_no, 10001);
+    }
+    #[test]
+    fn patient_search_covers_name_file_national_id_and_phone() {
+        let mut c = db();
+        let mut data = input("مريض البحث الكامل", "1234567890");
+        data.phone = Some("0555123456".into());
+        let patient = create(&mut c, data).unwrap();
+
+        for query in [
+            "البحث الكامل".to_string(),
+            patient.file_no.to_string(),
+            "١٢٣٤٥٦٧٨٩٠".to_string(),
+            "0555123456".to_string(),
+        ] {
+            let rows = list(&c, Some(query), 50).unwrap();
+            assert!(rows.iter().any(|row| row.id == patient.id));
+        }
+    }
+
+    #[test]
+    fn birth_date_upper_boundary_is_enforced() {
+        let mut c = db();
+        let mut data = input("مريض تاريخ علوي", "1234567890");
+        data.birth_date = Some("2051-01-01".into());
+        assert!(create(&mut c, data).is_err());
     }
 }

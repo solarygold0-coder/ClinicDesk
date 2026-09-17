@@ -323,7 +323,7 @@ mod tests {
             &mut db,
             "gm".into(),
             "مدير".into(),
-            "StrongPassword1".into(),
+            "A1!z".into(),
             "general_manager".into(),
         )
         .unwrap();
@@ -333,8 +333,8 @@ mod tests {
             })
             .unwrap();
         assert!(stored.starts_with("$argon2"));
-        assert!(!stored.contains("StrongPassword1"));
-        let s = authenticate(&db, "GM".into(), "StrongPassword1".into()).unwrap();
+        assert!(!stored.contains("A1!z"));
+        let s = authenticate(&db, "GM".into(), "A1!z".into()).unwrap();
         assert_eq!(validate_session(&db, s.token).unwrap().employee_code, "U01");
     }
     #[test]
@@ -344,11 +344,11 @@ mod tests {
             &mut db,
             "auditor".into(),
             "موظف تدقيق".into(),
-            "StrongPassword1".into(),
+            "A1!z".into(),
             "general_manager".into(),
         )
         .unwrap();
-        let session = authenticate(&db, "auditor".into(), "StrongPassword1".into()).unwrap();
+        let session = authenticate(&db, "auditor".into(), "A1!z".into()).unwrap();
         db.execute(
             "INSERT INTO audit_log(event_type,entity_type) VALUES('test','patient')",
             [],
@@ -372,7 +372,7 @@ mod tests {
             &mut db,
             "user".into(),
             "موظف".into(),
-            "StrongPassword1".into(),
+            "A1!z".into(),
             "ordinary_employee".into(),
         )
         .unwrap();
@@ -385,14 +385,14 @@ mod tests {
             &mut db,
             "user".into(),
             "موظف".into(),
-            "StrongPassword1".into(),
+            "A1!z".into(),
             "ordinary_employee".into(),
         )
         .unwrap();
-        let s = authenticate(&db, "user".into(), "StrongPassword1".into()).unwrap();
-        reset_password(&db, u.id, "TemporaryPassword2".into()).unwrap();
+        let s = authenticate(&db, "user".into(), "A1!z".into()).unwrap();
+        reset_password(&db, u.id, "B2@y".into()).unwrap();
         assert!(validate_session(&db, s.token).is_err());
-        let s2 = authenticate(&db, "user".into(), "TemporaryPassword2".into()).unwrap();
+        let s2 = authenticate(&db, "user".into(), "B2@y".into()).unwrap();
         assert!(s2.user.must_change_password);
     }
     #[test]
@@ -402,12 +402,31 @@ mod tests {
             &mut db,
             "user".into(),
             "موظف".into(),
-            "StrongPassword1".into(),
+            "A1!z".into(),
             "ordinary_employee".into(),
         )
         .unwrap();
-        let s = authenticate(&db, "user".into(), "StrongPassword1".into()).unwrap();
+        let s = authenticate(&db, "user".into(), "A1!z".into()).unwrap();
         set_status(&db, u.id, "RETIRED".into(), Some("service_end".into())).unwrap();
         assert!(validate_session(&db, s.token).is_err());
+    }
+    #[test]
+    fn legacy_long_hash_can_login_for_forced_password_change() {
+        let db = db();
+        let salt = SaltString::encode_b64(Uuid::new_v4().as_bytes()).unwrap();
+        let legacy_hash = Argon2::default()
+            .hash_password(b"LegacyPassword1", &salt)
+            .unwrap()
+            .to_string();
+        db.execute(
+            "INSERT INTO users(username,display_name,password_hash,employee_code,role_type,must_change_password) VALUES('legacy','موظف قديم',?1,'U01','ordinary_employee',1)",
+            [legacy_hash],
+        )
+        .unwrap();
+        let session = authenticate(&db, "legacy".into(), "LegacyPassword1".into()).unwrap();
+        assert!(session.user.must_change_password);
+        assert!(hash_password("123").is_err());
+        assert!(hash_password("12345").is_err());
+        assert!(hash_password("1234").is_ok());
     }
 }

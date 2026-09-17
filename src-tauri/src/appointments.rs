@@ -196,17 +196,25 @@ fn normalized(
 fn ensure_no_conflict(
     tx: &Transaction,
     i: &AppointmentInput,
+    patient_id: i64,
     starts: &str,
     ends: &str,
     exclude_id: Option<i64>,
 ) -> Result<(), String> {
     let sql = format!(
-        "SELECT id FROM appointments WHERE status IN {ACTIVE} AND starts_at<?1 AND ends_at>?2 AND ((?3 IS NOT NULL AND doctor_id=?3) OR (?3 IS NULL AND ?4 IS NOT NULL AND doctor_id IS NULL AND clinic_id=?4)) AND (?5 IS NULL OR id<>?5) LIMIT 1"
+        "SELECT id FROM appointments WHERE status IN {ACTIVE} AND starts_at<?1 AND ends_at>?2 AND (((?3 IS NOT NULL AND doctor_id=?3) OR (?3 IS NULL AND ?4 IS NOT NULL AND doctor_id IS NULL AND clinic_id=?4)) OR patient_id=?5) AND (?6 IS NULL OR id<>?6) LIMIT 1"
     );
     let conflict: Option<i64> = tx
         .query_row(
             &sql,
-            params![ends, starts, i.doctor_id, i.clinic_id, exclude_id],
+            params![
+                ends,
+                starts,
+                i.doctor_id,
+                i.clinic_id,
+                patient_id,
+                exclude_id
+            ],
             |r| r.get(0),
         )
         .optional()
@@ -222,7 +230,7 @@ pub fn create(c: &mut Connection, i: AppointmentInput) -> Result<Appointment, St
     let tx = c.transaction().map_err(|e| e.to_string())?;
     validate_schedule(&tx, start, end)?;
     let pid = ensure_refs(&tx, &i)?;
-    ensure_no_conflict(&tx, &i, &starts, &ends, None)?;
+    ensure_no_conflict(&tx, &i, pid, &starts, &ends, None)?;
     tx.execute("INSERT INTO appointments(patient_id,clinic_id,doctor_id,starts_at,ends_at,status,notes)VALUES(?1,?2,?3,?4,?5,'scheduled',?6)",params![pid,i.clinic_id,i.doctor_id,starts,ends,i.notes.map(|x|x.trim().to_string()).filter(|x|!x.is_empty())]).map_err(|e|e.to_string())?;
     let id = tx.last_insert_rowid();
     tx.execute(
@@ -261,7 +269,7 @@ pub fn update(c: &mut Connection, id: i64, i: AppointmentInput) -> Result<Appoin
     let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
     validate_schedule(&tx, start, end)?;
     let pid = ensure_refs(&tx, &i)?;
-    ensure_no_conflict(&tx, &i, &starts, &ends, Some(id))?;
+    ensure_no_conflict(&tx, &i, pid, &starts, &ends, Some(id))?;
     let notes = i
         .notes
         .map(|x| x.trim().to_string())
@@ -401,8 +409,14 @@ mod tests {
             [],
         )
         .unwrap();
+        c.execute(
+            "INSERT INTO patients(file_no,full_name)VALUES(2,'مريض ثان')",
+            [],
+        )
+        .unwrap();
         create(&mut c, i("2026-09-20T10:00")).unwrap();
         let mut other = i("2026-09-20T10:15");
+        other.patient_file_no = 2;
         other.doctor_id = Some(2);
         assert!(create(&mut c, other).is_ok())
     }
@@ -466,5 +480,23 @@ mod tests {
         let a = create(&mut c, i("2026-09-20T10:00")).unwrap();
         set_status(&c, a.id, "completed").unwrap();
         assert!(update(&mut c, a.id, i("2026-09-20T11:00")).is_err())
+    }
+    #[test]
+    fn same_patient_cannot_overlap_across_different_doctors() {
+        let mut c = db();
+        c.execute(
+            "INSERT INTO doctors(clinic_id,name)VALUES(1,'طبيب ثان')",
+            [],
+        )
+        .unwrap();
+        create(&mut c, i("2026-09-20T10:00")).unwrap();
+        let mut other = i("2026-09-20T10:15");
+        other.doctor_id = Some(2);
+        assert!(create(&mut c, other).is_err());
+    }
+
+    #[test]
+    fn appointment_lower_date_boundary_is_enforced() {
+        assert!(normalized(&i("1949-12-29T10:00")).is_err());
     }
 }

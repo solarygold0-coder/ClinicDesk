@@ -1,3 +1,4 @@
+use chrono::{Datelike, NaiveDateTime};
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
@@ -28,12 +29,17 @@ fn validate(input: &VisitTrackingInput) -> Result<(), String> {
     {
         return Err("مرحلة الزيارة غير صالحة".into());
     }
-    if input
-        .follow_up_at
-        .as_deref()
-        .is_some_and(|value| value.trim().is_empty())
-    {
-        return Err("تاريخ المتابعة غير صالح".into());
+    if let Some(value) = input.follow_up_at.as_deref() {
+        let value = value.trim();
+        if value.is_empty() {
+            return Err("تاريخ المتابعة غير صالح".into());
+        }
+        let date = NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S")
+            .or_else(|_| NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M"))
+            .map_err(|_| "تاريخ المتابعة غير صالح".to_string())?;
+        if !(1950..=2050).contains(&date.year()) {
+            return Err("تاريخ المتابعة يجب أن يكون بين 1950 و2050".into());
+        }
     }
     Ok(())
 }
@@ -175,5 +181,33 @@ mod tests {
     fn missing_appointment_tracking_is_rejected() {
         let c = db();
         assert!(get(&c, 999).is_err());
+    }
+    #[test]
+    fn follow_up_date_range_is_enforced() {
+        let c = db();
+        for value in ["1949-12-31T10:00:00", "2051-01-01T10:00:00"] {
+            assert!(update(
+                &c,
+                1,
+                VisitTrackingInput {
+                    visit_type: "follow_up".into(),
+                    visit_stage: "scheduled".into(),
+                    follow_up_at: Some(value.into()),
+                },
+            )
+            .is_err());
+        }
+        for value in ["1950-01-01T10:00:00", "2050-12-31T10:00:00"] {
+            assert!(update(
+                &c,
+                1,
+                VisitTrackingInput {
+                    visit_type: "follow_up".into(),
+                    visit_stage: "scheduled".into(),
+                    follow_up_at: Some(value.into()),
+                },
+            )
+            .is_ok());
+        }
     }
 }

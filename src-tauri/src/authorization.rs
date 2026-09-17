@@ -167,7 +167,7 @@ mod tests {
 
     fn session(db: &mut Connection, n: i64, role: &str) -> String {
         let username = format!("user{n}");
-        let password = format!("Password-{n}-Strong");
+        let password = format!("{n:04}");
         auth::create_user(
             db,
             username.clone(),

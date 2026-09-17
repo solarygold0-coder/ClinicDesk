@@ -275,4 +275,16 @@ mod tests {
         )
         .is_err());
     }
+    #[test]
+    fn closure_lower_range_is_enforced_in_backend() {
+        let c = db();
+        assert!(add_closure(
+            &c,
+            ClosureInput {
+                closure_date: "1949-12-31".into(),
+                reason: None
+            }
+        )
+        .is_err());
+    }
 }
