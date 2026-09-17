@@ -228,7 +228,11 @@ pub fn create(c: &mut Connection, i: AppointmentInput) -> Result<Appointment, St
         Some(id),
         None,
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: None, after_json: Some(&after_json), reason: None },
+        &audit::AuditChange {
+            before_json: None,
+            after_json: Some(&after_json),
+            reason: None,
+        },
     )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(created)
@@ -237,7 +241,10 @@ pub fn update(c: &mut Connection, id: i64, i: AppointmentInput) -> Result<Appoin
     let (start, end, starts, ends) = normalized(&i)?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
     let before = get(&tx, id)?.ok_or_else(|| "الموعد غير موجود".to_string())?;
-    if matches!(before.status.as_str(), "completed" | "cancelled" | "no_show") {
+    if matches!(
+        before.status.as_str(),
+        "completed" | "cancelled" | "no_show"
+    ) {
         return Err("لا يمكن تعديل موعد منتهي أو ملغي".into());
     }
     let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
@@ -263,7 +270,11 @@ pub fn update(c: &mut Connection, id: i64, i: AppointmentInput) -> Result<Appoin
         Some(id),
         None,
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: None },
+        &audit::AuditChange {
+            before_json: Some(&before_json),
+            after_json: Some(&after_json),
+            reason: None,
+        },
     )?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(after)
@@ -308,7 +319,11 @@ pub fn set_status(c: &Connection, id: i64, status: &str) -> Result<(), String> {
         Some(id),
         Some(&details),
         &audit::AuditActor::default(),
-        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: None },
+        &audit::AuditChange {
+            before_json: Some(&before_json),
+            after_json: Some(&after_json),
+            reason: None,
+        },
     )
 }
 #[cfg(test)]
