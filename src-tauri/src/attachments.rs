@@ -315,7 +315,8 @@ pub fn add_named(
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute("INSERT INTO attachments(patient_id,stored_name,original_name,display_name,category,mime_type,size_bytes,sha256) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",params![patient_id,stored_name,original_name,label,category,mime_type,size_bytes,sha256]).map_err(|e|if e.to_string().contains("attachment_limit_20"){"الحد الأقصى للمرفقات النشطة للمريض هو 20 مرفقاً".to_string()}else{e.to_string()})?;
     let id = tx.last_insert_rowid();
-    let attachment = get_by_id(&tx, id)?.ok_or_else(|| "تعذر قراءة المرفق بعد الحفظ".to_string())?;
+    let attachment =
+        get_by_id(&tx, id)?.ok_or_else(|| "تعذر قراءة المرفق بعد الحفظ".to_string())?;
     let after_json = serde_json::to_string(&attachment).map_err(|e| e.to_string())?;
     audit_attachment(
         &tx,
