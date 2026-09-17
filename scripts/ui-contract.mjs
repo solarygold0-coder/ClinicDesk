@@ -23,7 +23,7 @@ const checks = [
   ['root app remains RTL', t.app.includes('className="app"dir="rtl"')],
   ['document language is Arabic', t.main.includes("document.documentElement.lang='ar'")],
   ['document direction is RTL', t.main.includes("document.documentElement.dir='rtl'")],
-  ['RTL stylesheet is loaded', files.main.includes("'./rtl.css'")],
+  ['RTL stylesheet enforces page direction and logical sidebar/mobile boundaries', files.main.includes("'./rtl.css'") && t.rtl.includes('.page{direction:rtl;text-align:start}') && t.rtl.includes('.app>aside{border-inline-start:0;border-inline-end:1pxsolid#e6ebf1}') && t.rtl.includes('.alertsPopover{inset-inline:20px}') && !files.rtl.includes('left: 20px') && !files.rtl.includes('right: 20px')],
   ['UI hardening stylesheet is loaded', files.main.includes("'./ui-fixes.css'")],
   ['print stylesheet is loaded', files.main.includes("'./print.css'")],
   ['F2 patient search shortcut exists', t.app.includes("event.key==='F2'")],
