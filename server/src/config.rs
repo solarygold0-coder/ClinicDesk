@@ -31,6 +31,12 @@ impl Config {
         let tls_key = env::var("CLINICDESK_TLS_KEY")
             .map(PathBuf::from)
             .map_err(|_| "CLINICDESK_TLS_KEY مطلوب".to_string())?;
-        Ok(Self { bind, database_url, server_token, tls_cert, tls_key })
+        Ok(Self {
+            bind,
+            database_url,
+            server_token,
+            tls_cert,
+            tls_key,
+        })
     }
 }

@@ -12,7 +12,7 @@ const initial: SchedulingSettings = {
   slotMinutes: 30,
 };
 
-export function SchedulingPage() {
+export function SchedulingPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [form, setForm] = useState(initial);
   const [closures, setClosures] = useState<ClosureDate[]>([]);
   const [date, setDate] = useState('');
@@ -122,7 +122,7 @@ export function SchedulingPage() {
 
   return (
     <section className="page schedulingPage" dir="rtl" aria-busy={busy}>
-      <div className="pageTitle"><div><h1>الإعدادات</h1><p>إعدادات المواعيد والنسخ الاحتياطي المحلي.</p></div></div>
+      {!embedded && <div className="pageTitle"><div><h1>الإعدادات</h1><p>إعدادات المواعيد والنسخ الاحتياطي المحلي.</p></div></div>}
       {error && <div className="notice errorText" role="alert">{error}</div>}
       {ok && <div className="notice successText" role="status" aria-live="polite">{ok}</div>}
       <div className="settingsGrid">

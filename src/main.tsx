@@ -6,6 +6,7 @@ import './rtl.css';
 import './ui-fixes.css';
 import './accountability.css';
 import './provider-unavailability.css';
+import './appointment-status.css';
 import './print.css';
 
 document.documentElement.lang = 'ar';

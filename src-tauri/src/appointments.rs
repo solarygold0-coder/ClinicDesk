@@ -107,6 +107,17 @@ pub fn list(c: &Connection, from: &str, to: &str) -> Result<Vec<Appointment>, St
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
 }
+pub fn list_overdue(c: &Connection, to: &str, limit: i64) -> Result<Vec<Appointment>, String> {
+    let sql = format!(
+        "{SELECT} WHERE a.status='scheduled' AND a.ends_at<?1 ORDER BY a.ends_at DESC LIMIT ?2"
+    );
+    let mut s = c.prepare(&sql).map_err(|e| e.to_string())?;
+    let rows = s
+        .query_map(params![to, limit.clamp(1, 500)], map)
+        .map_err(|e| e.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())
+}
 pub fn list_for_patient(
     c: &Connection,
     patient_id: i64,

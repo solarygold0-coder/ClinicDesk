@@ -12,21 +12,15 @@ import {
 } from 'lucide-react';
 import { api, Appointment, FollowUpVisit, Patient } from './api';
 import { fullGregorianDateTime } from './dateDisplay';
+import { appointmentDisplayClass, appointmentDisplayLabel, appointmentDisplayStatus } from './appointmentPresentation';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const day = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const labels: Record<string, string> = {
-  scheduled: 'مجدول',
-  arrived: 'وصل',
-  in_progress: 'قيد الخدمة',
-  completed: 'مكتمل',
-  cancelled: 'ملغي',
-  no_show: 'لم يحضر',
-};
-type Filter = 'today' | 'week' | 'missed' | 'renewal' | 'threeMonths' | 'upcoming';
+type Filter = 'today' | 'week' | 'overdue' | 'missed' | 'renewal' | 'threeMonths' | 'upcoming';
 const filterLabels: Record<Filter, string> = {
   today: 'اليوم',
   week: 'الأسبوع القادم',
+  overdue: 'فائت',
   missed: 'لم يحضر',
   renewal: 'التجديد',
   threeMonths: 'متابعة بعد 3 أشهر',
@@ -54,6 +48,7 @@ export function Dashboard({
   const [rangeRows, setRangeRows] = useState<Appointment[]>([]);
   const [upcomingRows, setUpcomingRows] = useState<Appointment[]>([]);
   const [missedRows, setMissedRows] = useState<Appointment[]>([]);
+  const [overdueRows, setOverdueRows] = useState<Appointment[]>([]);
   const [followUps, setFollowUps] = useState<FollowUpVisit[]>([]);
   const [alerts, setAlerts] = useState<Appointment[]>([]);
   const [showUpcomingReminder, setShowUpcomingReminder] = useState(false);
@@ -78,17 +73,19 @@ export function Dashboard({
       api.appointments(`${today}T00:00:00`, `${day(rangeEnd)}T23:59:59`),
       api.upcomingAppointments(`${today}T00:00:00`),
       api.missedAppointments(`${today}T00:00:00`),
+      api.overdueAppointments(`${today}T00:00:00`),
       api.followUps(`${today}T00:00:00`, `${day(followEnd)}T23:59:59`),
       api.patientCount(),
       api.inactivePatients(10, 100),
     ])
-      .then(([a, next, range, upcoming, missed, followUpRows, totalPatients, inactivePatients]) => {
+      .then(([a, next, range, upcoming, missed, overdue, followUpRows, totalPatients, inactivePatients]) => {
         const nextAlerts = next.filter((x) => x.status === 'scheduled' && new Date(x.startsAt).getTime() >= now.getTime());
         setRows(a);
         setAlerts(nextAlerts);
         setRangeRows(range);
         setUpcomingRows(upcoming);
         setMissedRows(missed);
+        setOverdueRows(overdue);
         setFollowUps(followUpRows);
         setPatientCount(totalPatients);
         setInactive(inactivePatients);
@@ -108,7 +105,7 @@ export function Dashboard({
       .catch((e) => setError(String(e)));
   }, []);
 
-  const waiting = rows.filter((a) => ['scheduled', 'arrived'].includes(a.status)).length;
+  const waiting = rows.filter((a) => ['upcoming', 'due_now', 'arrived'].includes(appointmentDisplayStatus(a))).length;
   const current = useMemo(
     () =>
       rows.find((a) => a.status === 'in_progress') ||
@@ -127,11 +124,12 @@ export function Dashboard({
     week.setDate(week.getDate() + 7);
     if (filter === 'today') return rows.filter((a) => a.status !== 'cancelled');
     if (filter === 'week') return rangeRows.filter((a) => new Date(a.startsAt) <= week && a.status !== 'cancelled');
+    if (filter === 'overdue') return overdueRows;
     if (filter === 'missed') return missedRows;
     return upcomingRows.filter(
       (a) => ['scheduled', 'arrived', 'in_progress'].includes(a.status) && new Date(a.startsAt) >= now,
     );
-  }, [filter, rows, rangeRows, upcomingRows, missedRows]);
+  }, [filter, rows, rangeRows, upcomingRows, missedRows, overdueRows]);
   const followFiltered = useMemo(() => {
     const now = new Date();
     const three = new Date(now);
@@ -141,7 +139,7 @@ export function Dashboard({
     return [];
   }, [filter, followUps]);
   const special = filter === 'renewal' || filter === 'threeMonths';
-  const alertCount = alerts.length + inactive.length;
+  const alertCount = alerts.length + overdueRows.length + inactive.length;
 
   return (
     <>
@@ -189,6 +187,12 @@ export function Dashboard({
                             {fullGregorianDateTime(a.startsAt)}
                           </small>
                         </span>
+                      </button>
+                    ))}
+                    {overdueRows.slice(0, 8).map((a) => (
+                      <button key={`overdue-${a.id}`} type="button" onClick={() => onPatient(a.fileNo)}>
+                        <Clock3 aria-hidden="true" />
+                        <span><b>{a.patientName}</b><small>موعد فائت • ملف <bdi>{a.fileNo}</bdi> • {fullGregorianDateTime(a.startsAt)}</small></span>
                       </button>
                     ))}
                     {inactive.slice(0, 8).map((p) => (
@@ -295,7 +299,7 @@ export function Dashboard({
                 <button key={a.id} type="button" onClick={() => onPatient(a.fileNo)}>
                   <time dir="ltr">{fullGregorianDateTime(a.startsAt)}</time>
                   <span><b>{a.patientName}</b><small>ملف <bdi>{a.fileNo}</bdi> • {a.clinicName || a.doctorName || 'بدون تحديد'}</small></span>
-                  <em className={`status status-${a.status}`}>{labels[a.status] || a.status}</em>
+                  <em className={appointmentDisplayClass(a)}>{appointmentDisplayLabel(a)}</em>
                 </button>
               ))}
             </div>

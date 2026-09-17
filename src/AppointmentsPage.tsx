@@ -13,6 +13,8 @@ import {
 } from './api';
 import { getSaudiScheduleAdvisories } from './saudiScheduleAdvisory';
 import { fullGregorianDate, fullGregorianDateTime } from './dateDisplay';
+import { appointmentDisplayClass, appointmentDisplayLabel } from './appointmentPresentation';
+import { safePrint } from './safePrint';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 const day = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -23,14 +25,6 @@ const blank = (durationMinutes = 30): AppointmentInput => ({
   notes: '',
 });
 const blankVisit = (): VisitTrackingInput => ({ visitType: 'new', visitStage: 'scheduled' });
-const labels: Record<string, string> = {
-  scheduled: 'مجدول',
-  arrived: 'وصل',
-  in_progress: 'قيد الخدمة',
-  completed: 'مكتمل',
-  cancelled: 'ملغي',
-  no_show: 'لم يحضر',
-};
 const minutes = (a: Appointment) => Math.round((new Date(a.endsAt).getTime() - new Date(a.startsAt).getTime()) / 60000);
 const parts = (v: string) => {
   const m = v.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
@@ -227,7 +221,7 @@ export function AppointmentsPage({
       <div className="printOnly printHeader"><h1>ClinicDesk — مواعيد اليوم</h1><p>التاريخ الميلادي: {fullGregorianDate(date)} • عدد المواعيد: {rows.length}</p></div>
       <div className="pageTitle noPrint">
         <div><h1>المواعيد</h1><p>جدولة المراجعين وإدارة حركة اليوم</p></div>
-        <div className="headActions"><button type="button" onClick={() => window.print()}><Printer aria-hidden="true" />طباعة اليوم</button><button type="button" className="primary" disabled={busy} onClick={add}><CalendarPlus aria-hidden="true" />موعد جديد</button></div>
+        <div className="headActions"><button type="button" onClick={() => void safePrint()}><Printer aria-hidden="true" />طباعة اليوم</button><button type="button" className="primary" disabled={busy} onClick={add}><CalendarPlus aria-hidden="true" />موعد جديد</button></div>
       </div>
       <div className="appointmentToolbar noPrint">
         <label>يوم العمل<input type="date" min="1950-01-01" max="2050-12-31" value={date} onChange={(e) => setDate(e.target.value)} /></label>
@@ -246,7 +240,7 @@ export function AppointmentsPage({
                 <td><button type="button" className="linkButton noPrint" onClick={() => onPatient(a.fileNo)} aria-label={`فتح ملف المريض رقم ${a.fileNo}`}><bdi>{a.fileNo}</bdi></button><span className="printOnly"><bdi>{a.fileNo}</bdi></span></td>
                 <td><button type="button" className="linkButton noPrint" onClick={() => onPatient(a.fileNo)}>{a.patientName}</button><span className="printOnly">{a.patientName}</span></td>
                 <td>{a.clinicName || '—'}</td><td>{a.doctorName || '—'}</td>
-                <td><span className={`status status-${a.status}`}>{labels[a.status] || a.status}</span></td>
+                <td><span className={appointmentDisplayClass(a)}>{appointmentDisplayLabel(a)}</span></td>
                 <td className="noPrint"><div className="rowActions">
                   <button type="button" className="icon" title="تعديل الموعد" aria-label={`تعديل موعد ${a.patientName}`} disabled={statusBusyId !== null || ['completed', 'cancelled', 'no_show'].includes(a.status)} onClick={() => void edit(a)}><Pencil aria-hidden="true" /></button>
                   <select aria-label={`تغيير حالة موعد ${a.patientName}`} disabled={statusBusyId !== null} value={a.status} onChange={(e) => void updateStatus(a.id, e.target.value)}><option value="scheduled">مجدول</option><option value="arrived">وصل</option><option value="in_progress">قيد الخدمة</option><option value="completed">مكتمل</option><option value="cancelled">ملغي</option><option value="no_show">لم يحضر</option></select>

@@ -15,6 +15,8 @@ import {
 import { api, Appointment, Patient, PatientInput } from './api';
 import { PatientAttachments } from './PatientAttachments';
 import { fullGregorianDate, fullGregorianDateTime } from './dateDisplay';
+import { appointmentDisplayClass, appointmentDisplayLabel, appointmentDisplayStatus } from './appointmentPresentation';
+import { safePrint } from './safePrint';
 
 const blank: PatientInput = {
   fullName: '',
@@ -26,14 +28,6 @@ const blank: PatientInput = {
   chronicDiseases: '',
   allergies: '',
   notes: '',
-};
-const status: Record<string, string> = {
-  scheduled: 'مجدول',
-  arrived: 'وصل',
-  in_progress: 'قيد الخدمة',
-  completed: 'مكتمل',
-  cancelled: 'ملغي',
-  no_show: 'لم يحضر',
 };
 type PatientAction = { kind: 'add' | 'search'; token: number } | null;
 
@@ -71,7 +65,7 @@ export function PatientsPage({
     setHistory([]);
     setHistoryBusy(true);
     try {
-      setHistory(await api.patientAppointments(p.id, 30));
+      setHistory(await api.patientAppointments(p.id, 100));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -262,21 +256,28 @@ export function PatientsPage({
               <article><CalendarDays aria-hidden="true" /><span><small>تاريخ الميلاد</small><strong>{fullGregorianDate(details.birthDate)}</strong></span></article>
               <article><UserPlus aria-hidden="true" /><span><small>الجنس</small><strong>{details.sex || 'غير محدد'}</strong></span></article>
             </div>
+            <section className="patientHistoryProminent">
+              <h3><CalendarDays aria-hidden="true" /> المواعيد المرتبطة بهذا الملف</h3>
+              <p>القادمة والفائتة والحالات النهائية تظهر هنا داخل ملف المريض نفسه.</p>
+              {historyBusy ? <p>جارٍ تحميل المواعيد…</p> : history.length === 0 ? <p>لا توجد مواعيد مسجلة لهذا المريض.</p> : <>
+                <div className="patientAppointmentSummary">
+                  <div><small>قادم</small><strong>{history.filter((a) => ['upcoming','due_now'].includes(appointmentDisplayStatus(a))).length}</strong></div>
+                  <div><small>فائت</small><strong>{history.filter((a) => appointmentDisplayStatus(a) === 'overdue').length}</strong></div>
+                  <div><small>مكتمل</small><strong>{history.filter((a) => appointmentDisplayStatus(a) === 'completed').length}</strong></div>
+                  <div><small>لم يحضر</small><strong>{history.filter((a) => appointmentDisplayStatus(a) === 'no_show').length}</strong></div>
+                </div>
+                <div className="patientTimeline">{history.map((a) => (
+                  <article key={a.id}><Clock3 aria-hidden="true" /><span><strong>{fullGregorianDateTime(a.startsAt)}</strong><small>{a.clinicName || 'بدون عيادة'}{a.doctorName ? ` • ${a.doctorName}` : ''}</small></span><em className={appointmentDisplayClass(a)}>{appointmentDisplayLabel(a)}</em></article>
+                ))}</div>
+              </>}
+            </section>
             <section className="recordSummary"><h3>المعلومات الطبية المختصرة</h3><p>{details.medicalSummary || 'لا توجد معلومات طبية مختصرة مسجلة.'}</p></section>
             <section className="recordSummary"><h3>الأمراض المزمنة</h3><p>{details.chronicDiseases || 'لا توجد أمراض مزمنة مسجلة.'}</p></section>
             <section className="recordSummary"><h3>الحساسية</h3><p>{details.allergies || 'لا توجد حساسية مسجلة.'}</p></section>
             <section className="recordSummary"><h3>ملاحظات</h3><p>{details.notes || 'لا توجد ملاحظات مسجلة.'}</p></section>
             <PatientAttachments patientId={details.id} />
-            <section className="recordSummary">
-              <h3><CalendarDays aria-hidden="true" /> سجل المواعيد</h3>
-              {historyBusy ? <p>جارٍ تحميل المواعيد…</p> : history.length === 0 ? <p>لا توجد مواعيد مسجلة لهذا المريض.</p> : (
-                <div className="patientHistory">{history.map((a) => (
-                  <article key={a.id}><Clock3 aria-hidden="true" /><span><strong>{fullGregorianDateTime(a.startsAt)}</strong><small>{a.clinicName || 'بدون عيادة'}{a.doctorName ? ` • ${a.doctorName}` : ''}</small></span><em className={`status status-${a.status}`}>{status[a.status] || a.status}</em></article>
-                ))}</div>
-              )}
-            </section>
             <div className="modalActions noPrint">
-              <button type="button" disabled={busy} onClick={() => window.print()}><Printer aria-hidden="true" />طباعة الملف</button>
+              <button type="button" disabled={busy} onClick={() => void safePrint()}><Printer aria-hidden="true" />طباعة الملف</button>
               <button type="button" className="danger" disabled={busy} onClick={() => void archivePatient(details)}><Archive aria-hidden="true" />أرشفة الملف</button>
               <button type="button" className="primary" disabled={busy} onClick={() => edit(details)}><Pencil aria-hidden="true" />تعديل البيانات</button>
             </div>

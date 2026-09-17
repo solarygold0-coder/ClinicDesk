@@ -317,6 +317,15 @@ fn appointment_missed_history(
     })
 }
 #[tauri::command]
+fn appointment_overdue_history(
+    db: tauri::State<Db>,
+    actor_token: Option<String>,
+    to: String,
+) -> Result<Vec<appointments::Appointment>, String> {
+    authorize_command(&db, actor_token.as_deref(), authorization::APPOINTMENT_READ)?;
+    with_db(&db, |c| appointments::list_overdue(c, &to, 500))
+}
+#[tauri::command]
 fn appointment_upcoming_all(
     db: tauri::State<Db>,
     actor_token: Option<String>,
@@ -896,6 +905,7 @@ pub fn run() {
             doctor_delete,
             appointment_list,
             appointment_missed_history,
+            appointment_overdue_history,
             appointment_upcoming_all,
             patient_appointments,
             appointment_create,
