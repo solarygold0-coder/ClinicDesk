@@ -27,6 +27,7 @@ export type AuditEntry={id:number;eventType:string;entityType:string;entityId?:n
 export const api={
 login:(username:string,password:string)=>invoke<AuthSession>('auth_login',{username,password}),
 validateSession:(token:string)=>invoke<UserSummary>('auth_validate_session',{token}),
+changePassword:(token:string,currentPassword:string,newPassword:string)=>invoke<UserSummary>('auth_validate_session',{token,currentPassword,newPassword}),
 logout:(token:string)=>invoke<void>('auth_logout',{token}),
 users:()=>authed<UserSummary[]>('user_list'),
 createUser:(username:string,displayName:string,password:string,roleType:RoleType)=>authed<UserSummary>('user_create',{username,displayName,password,roleType}),
