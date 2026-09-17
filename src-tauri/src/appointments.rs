@@ -1,3 +1,4 @@
+use crate::audit;
 use chrono::{Datelike, NaiveDateTime, NaiveTime, Weekday};
 use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
@@ -166,8 +167,14 @@ fn normalized(
         return Err("مدة الموعد غير مدعومة".into());
     }
     let start = parse(&i.starts_at)?;
+    if !(1950..=2050).contains(&start.year()) {
+        return Err("تاريخ الموعد يجب أن يكون بين 1950 و2050".into());
+    }
     validate_day(start)?;
     let end = start + chrono::Duration::minutes(i.duration_minutes);
+    if !(1950..=2050).contains(&end.year()) {
+        return Err("نهاية الموعد يجب أن تكون بين 1950 و2050".into());
+    }
     Ok((
         start,
         end,
@@ -212,27 +219,28 @@ pub fn create(c: &mut Connection, i: AppointmentInput) -> Result<Appointment, St
         [pid],
     )
     .map_err(|e| e.to_string())?;
-    tx.execute(
-        "INSERT INTO audit_log(event_type,entity_type,entity_id)VALUES('create','appointment',?1)",
-        [id],
-    )
-    .map_err(|e| e.to_string())?;
+    let created = get(&tx, id)?.ok_or_else(|| "تعذر قراءة الموعد بعد الحفظ".to_string())?;
+    let after_json = serde_json::to_string(&created).map_err(|e| e.to_string())?;
+    audit::record_as(
+        &tx,
+        "create",
+        "appointment",
+        Some(id),
+        None,
+        &audit::AuditActor::default(),
+        &audit::AuditChange { before_json: None, after_json: Some(&after_json), reason: None },
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
-    get(c, id)?.ok_or_else(|| "تعذر قراءة الموعد بعد الحفظ".into())
+    Ok(created)
 }
 pub fn update(c: &mut Connection, id: i64, i: AppointmentInput) -> Result<Appointment, String> {
     let (start, end, starts, ends) = normalized(&i)?;
     let tx = c.transaction().map_err(|e| e.to_string())?;
-    let exists: Option<String> = tx
-        .query_row("SELECT status FROM appointments WHERE id=?1", [id], |r| {
-            r.get(0)
-        })
-        .optional()
-        .map_err(|e| e.to_string())?;
-    let status = exists.ok_or_else(|| "الموعد غير موجود".to_string())?;
-    if matches!(status.as_str(), "completed" | "cancelled" | "no_show") {
+    let before = get(&tx, id)?.ok_or_else(|| "الموعد غير موجود".to_string())?;
+    if matches!(before.status.as_str(), "completed" | "cancelled" | "no_show") {
         return Err("لا يمكن تعديل موعد منتهي أو ملغي".into());
     }
+    let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
     validate_schedule(&tx, start, end)?;
     let pid = ensure_refs(&tx, &i)?;
     ensure_no_conflict(&tx, &i, &starts, &ends, Some(id))?;
@@ -246,13 +254,19 @@ pub fn update(c: &mut Connection, id: i64, i: AppointmentInput) -> Result<Appoin
         [pid],
     )
     .map_err(|e| e.to_string())?;
-    tx.execute(
-        "INSERT INTO audit_log(event_type,entity_type,entity_id)VALUES('update','appointment',?1)",
-        [id],
-    )
-    .map_err(|e| e.to_string())?;
+    let after = get(&tx, id)?.ok_or_else(|| "تعذر قراءة الموعد بعد التعديل".to_string())?;
+    let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
+    audit::record_as(
+        &tx,
+        "update",
+        "appointment",
+        Some(id),
+        None,
+        &audit::AuditActor::default(),
+        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: None },
+    )?;
     tx.commit().map_err(|e| e.to_string())?;
-    get(c, id)?.ok_or_else(|| "تعذر قراءة الموعد بعد التعديل".into())
+    Ok(after)
 }
 pub fn get(c: &Connection, id: i64) -> Result<Option<Appointment>, String> {
     let sql = format!("{SELECT} WHERE a.id=?1");
@@ -273,6 +287,8 @@ pub fn set_status(c: &Connection, id: i64, status: &str) -> Result<(), String> {
     {
         return Err("حالة الموعد غير صالحة".into());
     }
+    let before = get(c, id)?.ok_or_else(|| "الموعد غير موجود".to_string())?;
+    let before_json = serde_json::to_string(&before).map_err(|e| e.to_string())?;
     let n = c
         .execute(
             "UPDATE appointments SET status=?1,updated_at=CURRENT_TIMESTAMP WHERE id=?2",
@@ -282,8 +298,18 @@ pub fn set_status(c: &Connection, id: i64, status: &str) -> Result<(), String> {
     if n == 0 {
         return Err("الموعد غير موجود".into());
     }
-    c.execute("INSERT INTO audit_log(event_type,entity_type,entity_id,details_json)VALUES('status','appointment',?1,?2)",params![id,format!("{{\"status\":\"{}\"}}",status)]).map_err(|e|e.to_string())?;
-    Ok(())
+    let after = get(c, id)?.ok_or_else(|| "الموعد غير موجود بعد تغيير الحالة".to_string())?;
+    let after_json = serde_json::to_string(&after).map_err(|e| e.to_string())?;
+    let details = serde_json::json!({"from":before.status,"to":status}).to_string();
+    audit::record_as(
+        c,
+        "status",
+        "appointment",
+        Some(id),
+        Some(&details),
+        &audit::AuditActor::default(),
+        &audit::AuditChange { before_json: Some(&before_json), after_json: Some(&after_json), reason: None },
+    )
 }
 #[cfg(test)]
 mod tests {
@@ -389,6 +415,11 @@ mod tests {
         assert!(create(&mut c, i("2026-09-20T10:00"))
             .unwrap_err()
             .contains("إغلاق"))
+    }
+    #[test]
+    fn appointment_range_is_enforced() {
+        let mut c = db();
+        assert!(create(&mut c, i("2051-01-02T10:00")).is_err())
     }
     #[test]
     fn reschedule_excludes_current_appointment() {
