@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: verify-reference-local-fixes
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   verify-reference:
@@ -35,11 +35,13 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Reassemble verified patch
+      - id: patch
+        name: Reassemble verify and apply local fixes
+        continue-on-error: true
         shell: python
         run: |
           from pathlib import Path
-          import base64, hashlib, lzma
+          import base64, hashlib, lzma, subprocess
 
           parts = [
               Path(".clinicdesk-handoff/patch-09c65e4.xz.b64.00"),
@@ -52,28 +54,26 @@ jobs:
           expected = "4fc98732a2cb0fe79bf8e47ada87fd8500a60785e0322be98844ab04efb575a1"
           if actual != expected:
               raise SystemExit(f"Patch SHA-256 mismatch: {actual}")
-          Path("09c65e4-local-fixes.patch").write_bytes(raw)
-          print(f"Verified patch SHA-256: {actual}")
+          patch = Path("09c65e4-local-fixes.patch")
+          patch.write_bytes(raw)
+          check = subprocess.run(["git","apply","--check",str(patch)])
+          if check.returncode == 0:
+              subprocess.run(["git","apply","--whitespace=nowarn",str(patch)], check=True)
+              print("Verified patch applied.")
+          else:
+              reverse = subprocess.run(["git","apply","--reverse","--check",str(patch)])
+              if reverse.returncode != 0:
+                  raise SystemExit("Patch cannot be applied or recognized as already applied.")
+              print("Verified patch was already applied.")
 
-      - name: Apply patch if needed
-        shell: bash
-        run: |
-          if git apply --check 09c65e4-local-fixes.patch; then
-            git apply --whitespace=nowarn 09c65e4-local-fixes.patch
-            echo "Patch applied."
-          elif git apply --reverse --check 09c65e4-local-fixes.patch; then
-            echo "Patch is already applied."
-          else
-            echo "Patch cannot be cleanly applied or reversed."
-            exit 1
-          fi
-
-      - name: Normalize npm lockfile for public registry
+      - id: lock
+        name: Normalize npm lockfile registry URLs
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
         shell: python
         run: |
           from pathlib import Path
           import json
-
           path = Path("package-lock.json")
           data = json.loads(path.read_text(encoding="utf-8"))
           changed = 0
@@ -91,35 +91,89 @@ jobs:
           path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
           print(f"Normalized {changed} npm URLs")
 
-      - name: Install frontend dependencies
+      - id: npmci
+        name: npm ci
+        if: steps.lock.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm ci
 
-      - name: Build frontend
+      - id: frontend
+        name: Frontend build
+        if: steps.npmci.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm run build
 
-      - name: UI contract
+      - id: ui
+        name: UI contract
+        if: steps.frontend.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm run test:ui-contract
 
-      - name: Format Rust
+      - id: fmt
+        name: Rust format check
+        if: steps.patch.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
 
-      - name: Clippy
+      - id: clippy
+        name: Rust clippy
+        if: steps.fmt.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
-      - name: Rust tests
+      - id: tests
+        name: Rust tests
+        if: steps.clippy.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Build Windows installers
+      - id: tauri
+        name: Build Windows MSI and NSIS
+        if: steps.ui.outcome == 'success' && steps.tests.outcome == 'success'
+        continue-on-error: true
         shell: pwsh
         run: npm run tauri -- build
 
+      - name: Write failure report to reference branch
+        if: always() && steps.tauri.outcome != 'success'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force docs/reference | Out-Null
+          @"
+          # Reference branch CI diagnostic
+
+          Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID
+          Trigger SHA: $env:GITHUB_SHA
+
+          - patch: ${{ steps.patch.outcome }}
+          - lock normalization: ${{ steps.lock.outcome }}
+          - npm ci: ${{ steps.npmci.outcome }}
+          - frontend build: ${{ steps.frontend.outcome }}
+          - UI contract: ${{ steps.ui.outcome }}
+          - rustfmt: ${{ steps.fmt.outcome }}
+          - clippy: ${{ steps.clippy.outcome }}
+          - rust tests: ${{ steps.tests.outcome }}
+          - tauri windows build: ${{ steps.tauri.outcome }}
+          "@ | Out-File -Encoding utf8 docs/reference/CI-LAST-FAILURE.md
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/reference/CI-LAST-FAILURE.md
+          git commit -m "Record reference verification failure"
+          git reset --hard HEAD
+          git clean -fd
+          git pull --rebase origin reference/local-fixes-on-c9611579
+          git push origin HEAD:reference/local-fixes-on-c9611579
+          exit 1
+
       - name: Hash installers
+        if: steps.tauri.outcome == 'success'
         shell: pwsh
         run: |
           Get-ChildItem -Recurse src-tauri/target/release/bundle -File | ForEach-Object {
@@ -128,6 +182,7 @@ jobs:
           } | Out-File -Encoding utf8 SHA256SUMS-reference-build.txt
 
       - name: Upload Windows installers
+        if: steps.tauri.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: ClinicDesk-reference-Windows
@@ -137,7 +192,8 @@ jobs:
             SHA256SUMS-reference-build.txt
           if-no-files-found: error
 
-      - name: Commit verified source to reference branch
+      - name: Commit verified clean source
+        if: steps.tauri.outcome == 'success'
         shell: pwsh
         run: |
           if (Test-Path ".clinicdesk-handoff") { Remove-Item -Recurse -Force ".clinicdesk-handoff" }
