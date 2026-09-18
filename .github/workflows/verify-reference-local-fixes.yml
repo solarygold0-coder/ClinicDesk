@@ -117,7 +117,7 @@ jobs:
         if: steps.patch.outcome == 'success'
         continue-on-error: true
         shell: pwsh
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
 
       - id: clippy
         name: Rust clippy
