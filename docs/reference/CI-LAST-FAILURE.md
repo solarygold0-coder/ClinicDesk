@@ -1,15 +1,14 @@
 # Reference branch CI diagnostic
 
-Commit under test: 56473c2d389f5206a0a3187ff954446debdbd3ab
-Run: https://github.com/solarygold0-coder/ClinicDesk/actions/runs/35289202881
+Run: https://github.com/solarygold0-coder/ClinicDesk/actions/runs/35290011931
+Trigger SHA: 9453ee6f1707307c6bbd96fd0c75944b4cf4dfa5
 
-- reassemble: success
 - patch: success
 - lock normalization: success
 - npm ci: success
 - frontend build: success
-- UI contract: failure
-- rustfmt: success
-- clippy: success
-- rust tests: success
+- UI contract: success
+- rustfmt: failure
+- clippy: skipped
+- rust tests: skipped
 - tauri windows build: skipped
