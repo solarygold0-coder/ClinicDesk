@@ -1,0 +1,153 @@
+name: verify-reference-local-fixes
+
+on:
+  push:
+    branches:
+      - tauri-react-rebuild
+
+permissions:
+  contents: write
+
+concurrency:
+  group: verify-reference-local-fixes
+  cancel-in-progress: false
+
+jobs:
+  verify-reference:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    timeout-minutes: 75
+
+    steps:
+      - name: Checkout reference branch
+        uses: actions/checkout@v4
+        with:
+          ref: reference/local-fixes-on-c9611579
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Reassemble verified patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import base64, hashlib, lzma
+
+          parts = [
+              Path(".clinicdesk-handoff/patch-09c65e4.xz.b64.00"),
+              Path(".clinicdesk-handoff/patch-09c65e4.xz.b64.01"),
+              Path(".clinicdesk-handoff/patch-09c65e4.xz.b64.02"),
+          ]
+          encoded = "".join(p.read_text(encoding="ascii").strip() for p in parts)
+          raw = lzma.decompress(base64.b64decode(encoded))
+          actual = hashlib.sha256(raw).hexdigest()
+          expected = "4fc98732a2cb0fe79bf8e47ada87fd8500a60785e0322be98844ab04efb575a1"
+          if actual != expected:
+              raise SystemExit(f"Patch SHA-256 mismatch: {actual}")
+          Path("09c65e4-local-fixes.patch").write_bytes(raw)
+          print(f"Verified patch SHA-256: {actual}")
+
+      - name: Apply patch if needed
+        shell: bash
+        run: |
+          if git apply --check 09c65e4-local-fixes.patch; then
+            git apply --whitespace=nowarn 09c65e4-local-fixes.patch
+            echo "Patch applied."
+          elif git apply --reverse --check 09c65e4-local-fixes.patch; then
+            echo "Patch is already applied."
+          else
+            echo "Patch cannot be cleanly applied or reversed."
+            exit 1
+          fi
+
+      - name: Normalize npm lockfile for public registry
+        shell: python
+        run: |
+          from pathlib import Path
+          import json
+
+          path = Path("package-lock.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          changed = 0
+          for key, meta in data.get("packages", {}).items():
+              resolved = meta.get("resolved")
+              version = meta.get("version")
+              if not resolved or not version or "35.245.43.102" not in resolved:
+                  continue
+              package = key.split("node_modules/")[-1].strip("/")
+              if not package:
+                  continue
+              tar_name = package.split("/")[-1]
+              meta["resolved"] = f"https://registry.npmjs.org/{package}/-/{tar_name}-{version}.tgz"
+              changed += 1
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print(f"Normalized {changed} npm URLs")
+
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: npm ci
+
+      - name: Build frontend
+        shell: pwsh
+        run: npm run build
+
+      - name: UI contract
+        shell: pwsh
+        run: npm run test:ui-contract
+
+      - name: Format Rust
+        shell: pwsh
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all
+
+      - name: Clippy
+        shell: pwsh
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Rust tests
+        shell: pwsh
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows installers
+        shell: pwsh
+        run: npm run tauri -- build
+
+      - name: Hash installers
+        shell: pwsh
+        run: |
+          Get-ChildItem -Recurse src-tauri/target/release/bundle -File | ForEach-Object {
+            $hash = Get-FileHash $_.FullName -Algorithm SHA256
+            "$($hash.Hash)  $($_.FullName)"
+          } | Out-File -Encoding utf8 SHA256SUMS-reference-build.txt
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClinicDesk-reference-Windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+            SHA256SUMS-reference-build.txt
+          if-no-files-found: error
+
+      - name: Commit verified source to reference branch
+        shell: pwsh
+        run: |
+          if (Test-Path ".clinicdesk-handoff") { Remove-Item -Recurse -Force ".clinicdesk-handoff" }
+          if (Test-Path "09c65e4-local-fixes.patch") { Remove-Item -Force "09c65e4-local-fixes.patch" }
+          if (Test-Path ".github/workflows/apply-reference-patch-and-build.yml") { Remove-Item -Force ".github/workflows/apply-reference-patch-and-build.yml" }
+          if (Test-Path "docs/reference/CI-LAST-FAILURE.md") { Remove-Item -Force "docs/reference/CI-LAST-FAILURE.md" }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Apply verified local fixes from 09c65e4"
+          git pull --rebase origin reference/local-fixes-on-c9611579
+          git push origin HEAD:reference/local-fixes-on-c9611579
