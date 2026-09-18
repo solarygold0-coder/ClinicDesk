@@ -4,13 +4,15 @@ on:
   push:
     branches:
       - tauri-react-rebuild
+    paths:
+      - .github/workflows/verify-reference-local-fixes.yml
 
 permissions:
   contents: write
 
 concurrency:
   group: verify-reference-local-fixes
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verify-reference:
